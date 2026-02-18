@@ -8,67 +8,78 @@ datasource db {
 }
 
 model Tenant {
-  id        String   @id @default(uuid())
-  name      String
-  slug      String   @unique // e.g., 'acme-shop'
-  apiKey    String   @unique @default(uuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  endUsers  EndUser[]
-  chatSessions ChatSession[]
+  id              String           @id @default(uuid())
+  name            String
+  slug            String           @unique
+  apiKey          String           @unique @default(uuid())
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  systemPrompt    String?
+  chatConfig      Json?
+  chatSessions    ChatSession[]
+  endUsers        EndUser[]
   knowledgeChunks KnowledgeChunk[]
-  
-  // AI Configuration
-  systemPrompt String?   @db.Text // Custom instructions for the AI
+  User            User[]
 }
 
 model EndUser {
-  id        String   @id @default(uuid())
-  tenantId  String
-  tenant    Tenant   @relation(fields: [tenantId], references: [id])
-  externalId String? // e.g., CRM ID or email
-  name      String?
-  email     String?
-  createdAt DateTime @default(now())
-
+  id           String        @id @default(uuid())
+  tenantId     String
+  externalId   String?
+  name         String?
+  email        String?
+  createdAt    DateTime      @default(now())
+  isBlocked    Boolean       @default(false)
   chatSessions ChatSession[]
+  tenant       Tenant        @relation(fields: [tenantId], references: [id])
 }
 
 model ChatSession {
-  id        String   @id @default(uuid())
-  tenantId  String
-  tenant    Tenant   @relation(fields: [tenantId], references: [id])
-  endUserId String?
-  endUser   EndUser? @relation(fields: [endUserId], references: [id])
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  
-  currentMood String? // e.g., 'neutral', 'angry', 'happy'
-  status      String? @default("active") // 'active', 'agent_requested', 'closed', 'agent_connected'
-
-  messages  ChatMessage[]
+  id           String        @id @default(uuid())
+  tenantId     String
+  endUserId    String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  currentMood  String?
+  status       String?       @default("active")
+  isRestricted Boolean       @default(false)
+  unreadCount  Int           @default(0)
+  messages     ChatMessage[]
+  endUser      EndUser?      @relation(fields: [endUserId], references: [id])
+  tenant       Tenant        @relation(fields: [tenantId], references: [id])
 }
 
 model ChatMessage {
-  id        String   @id @default(uuid())
-  sessionId String
-  session   ChatSession @relation(fields: [sessionId], references: [id])
-  role      String   // 'user', 'assistant', 'system'
-  content   String
-  
-  sentimentScore Int?    @default(0)
-  sentimentLabel String? // 'positive', 'negative', 'neutral'
-  
-  createdAt DateTime @default(now())
+  id             String      @id @default(uuid())
+  sessionId      String
+  role           String
+  content        String
+  createdAt      DateTime    @default(now())
+  sentimentLabel String?
+  sentimentScore Int?        @default(0)
+  session        ChatSession @relation(fields: [sessionId], references: [id])
 }
 
 model KnowledgeChunk {
-  id        String   @id @default(uuid())
+  id         String   @id @default(uuid())
+  tenantId   String
+  content    String
+  source     String?
+  vectorId   String
+  createdAt  DateTime @default(now())
+  metadata   Json?
+  sourceType String   @default("text")
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
+}
+
+model User {
+  id        String   @id
+  email     String   @unique
+  password  String
+  name      String?
+  role      String   @default("admin")
   tenantId  String
-  tenant    Tenant   @relation(fields: [tenantId], references: [id])
-  content   String   @db.Text
-  source    String?  // e.g., "Website - Home Page" or "Pricing PDF"
-  vectorId  String   // ID in Pinecone (optional, if we want to cross-reference)
   createdAt DateTime @default(now())
+  updatedAt DateTime
+  Tenant    Tenant   @relation(fields: [tenantId], references: [id])
 }

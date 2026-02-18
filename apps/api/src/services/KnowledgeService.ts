@@ -128,6 +128,14 @@ export class KnowledgeService {
         // 3. Extract Text
         return results.matches.map(match => match.metadata?.content as string).filter(Boolean);
     }
+
+    async listKnowledge(tenantId: string) {
+        return await prisma.knowledgeChunk.findMany({
+            where: { tenantId },
+            orderBy: { createdAt: 'desc' },
+            take: 50
+        });
+    }
 }
 
 export const knowledgeService = new KnowledgeService();
