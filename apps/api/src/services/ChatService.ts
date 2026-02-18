@@ -3,7 +3,7 @@ import { MockAIService } from './MockAIService';
 import { AnalyzerService } from './AnalyzerService';
 import { knowledgeService } from './KnowledgeService';
 import { getChatModel, AIProvider } from '../lib/ai-config';
-import { HumanMessage, SystemMessage } from "@langchain/core/messages";
+import { HumanMessage, SystemMessage, AIMessage } from "@langchain/core/messages";
 
 // Get provider from env (default: ollama)
 const AI_PROVIDER = (process.env.AI_PROVIDER || 'ollama') as AIProvider;
@@ -13,12 +13,20 @@ export class ChatService {
     static async processMessage(apiKey: string, text: string, senderId: string = 'visitor') {
 
         // 1. Find Tenant
-        const tenant = await prisma.tenant.findUnique({
+        // Try to find by apiKey first, then by id (to support both)
+        let tenant = await prisma.tenant.findUnique({
             where: { apiKey: apiKey }
-        }) as any; // Cast to any to avoid type error until Prisma client regenerates completely
+        });
 
         if (!tenant) {
-            throw new Error('Invalid Tenant API Key');
+            // Fallback: Check if the key provided is actually the tenant ID
+            tenant = await prisma.tenant.findUnique({
+                where: { id: apiKey }
+            });
+        }
+
+        if (!tenant) {
+            throw new Error('Invalid Tenant API Key or ID');
         }
 
         // 2. Find or Create User
@@ -67,10 +75,13 @@ export class ChatService {
             }
         });
 
-        // Update Session Mood
+        // Update Session Mood & Increment Unread Count
         await prisma.chatSession.update({
             where: { id: session.id },
-            data: { currentMood: sentiment.mood }
+            data: {
+                currentMood: sentiment.mood,
+                unreadCount: { increment: 1 }
+            }
         });
 
         // 6. Check if Agent is Connected (Live Chat Mode)
@@ -100,15 +111,14 @@ export class ChatService {
             };
         }
 
-        // 8. Generate AI Response (RAG: Knowledge + Gemini)
+        // 8. Generate AI Response (RAG: Knowledge + History)
         let aiResponseText = "";
         try {
             // A. Retrieve Context from Knowledge Base
             const contextChunks = await knowledgeService.queryKnowledge(tenant.id, text);
             const context = contextChunks.join("\n\n");
 
-            // B. Construct Prompt
-            // B. Construct Prompt
+            // B. Construct System Prompt
             const defaultPrompt = `You are an expert AI customer support agent.
             Your goal is to provide accurate, helpful, and concise answers based STRICTLY on the provided context.
             
@@ -123,17 +133,33 @@ export class ChatService {
             Context:
             ${context}`;
 
-            // C. Call Gemini
+            // C. Fetch last 10 messages for conversation history
+            const recentMessages = await prisma.chatMessage.findMany({
+                where: { sessionId: session.id },
+                orderBy: { createdAt: 'asc' },
+                take: 10
+            });
+
+            // D. Build history array (skip system messages)
+            const historyMessages = recentMessages
+                .map(msg => {
+                    if (msg.role === 'user') return new HumanMessage(msg.content);
+                    if (msg.role === 'assistant') return new AIMessage(msg.content);
+                    return null;
+                })
+                .filter((m): m is HumanMessage | AIMessage => m !== null);
+
+            // E. Call AI with full conversation history
             const response = await chatModel.invoke([
                 new SystemMessage(systemPrompt),
-                new HumanMessage(text)
+                ...historyMessages
             ]);
 
             aiResponseText = response.content as string;
 
         } catch (error) {
             console.error("AI Generation Failed:", error);
-            // Fallback to Mock if AI fails
+            // Fallback if AI fails
             aiResponseText = "I'm having trouble connecting to my brain right now. Please try again later.";
         }
 
@@ -163,9 +189,17 @@ export class ChatService {
         // OR assume the dashboard knows the internal ID. 
         // Let's use apiKey for now as "Tenant Identifier" to keep it simple.
 
-        const tenant = await prisma.tenant.findUnique({
-            where: { apiKey: tenantId } // Using apiKey as "ID" for now
+        // Try to find by ID (Dashboard usually sends ID)
+        let tenant = await prisma.tenant.findUnique({
+            where: { id: tenantId }
         });
+
+        if (!tenant) {
+            // Fallback: Check if the key provided is actually the apiKey
+            tenant = await prisma.tenant.findUnique({
+                where: { apiKey: tenantId }
+            });
+        }
 
         if (!tenant) return [];
 
@@ -343,6 +377,14 @@ export class ChatService {
             }
         });
 
+        return { success: true };
+    }
+
+    static async markAsRead(sessionId: string) {
+        await prisma.chatSession.update({
+            where: { id: sessionId },
+            data: { unreadCount: 0 }
+        });
         return { success: true };
     }
 }

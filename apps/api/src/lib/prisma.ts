@@ -2,14 +2,17 @@ import { PrismaClient } from '@prisma/client';
 import path from 'path';
 import dotenv from 'dotenv';
 
-// Load .env file explicitly - go up 2 levels from src/lib to api root
-const envPath = path.resolve(__dirname, '../../.env');
-const result = dotenv.config({ path: envPath });
+// Load .env file explicitly if not already loaded
+if (!process.env.DATABASE_URL) {
+    const envPath = path.resolve(__dirname, '../../.env');
+    const result = dotenv.config({ path: envPath });
 
-if (result.error) {
-    console.error('[Prisma] Error loading .env:', result.error);
-} else {
-    console.log(`[Prisma] ✅ Loaded ${Object.keys(result.parsed || {}).length} environment variables from ${envPath}`);
+    if (result.error) {
+        // Suppress error if we are in production or if env is provided otherwise
+        console.warn('[Prisma] Note: Could not load .env file from', envPath);
+    } else {
+        console.log(`[Prisma] ✅ Loaded env from ${envPath}`);
+    }
 }
 
 // Fallback DATABASE_URL

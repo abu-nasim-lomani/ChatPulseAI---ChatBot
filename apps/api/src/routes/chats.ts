@@ -125,8 +125,26 @@ router.get('/session-status', async (req: Request, res: Response) => {
             return;
         }
 
-        res.json({ status: session.status });
+        res.json({ status: session.status, isBlocked: session.endUser?.isBlocked });
     } catch (error) {
+        res.status(500).json({ status: 'error', message: error instanceof Error ? error.message : 'Internal Server Error' });
+    }
+});
+
+// POST /chats/read
+router.post('/read', async (req: Request, res: Response) => {
+    try {
+        const { sessionId } = req.body;
+
+        if (!sessionId) {
+            res.status(400).json({ status: 'error', message: 'Session ID is required' });
+            return;
+        }
+
+        await ChatService.markAsRead(sessionId);
+        res.json({ status: 'success' });
+    } catch (error) {
+        console.error("Mark Read Error:", error);
         res.status(500).json({ status: 'error', message: error instanceof Error ? error.message : 'Internal Server Error' });
     }
 });

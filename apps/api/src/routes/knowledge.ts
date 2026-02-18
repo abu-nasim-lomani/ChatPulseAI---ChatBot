@@ -27,6 +27,22 @@ router.post('/add', async (req, res) => {
     }
 });
 
+// GET /knowledge/list?tenantId=...
+router.get('/list', async (req, res) => {
+    try {
+        const { tenantId } = req.query;
+        if (!tenantId) {
+            res.status(400).json({ error: 'Missing tenantId' });
+            return;
+        }
+        const chunks = await knowledgeService.listKnowledge(tenantId as string);
+        res.json(chunks);
+    } catch (error: any) {
+        console.error('[Knowledge] List Error:', error);
+        res.status(500).json({ error: 'Failed to fetch knowledge' });
+    }
+});
+
 // POST /knowledge/query (Testing purpose)
 router.post('/query', async (req, res) => {
     try {
