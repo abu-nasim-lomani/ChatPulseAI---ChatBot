@@ -1,0 +1,131 @@
+﻿[dotenv@17.2.4] injecting env (0) from src\.env -- tip: ΓÜÖ∩╕Å  specify custom .env file path with { path: '/custom/path/.env' }
+node.exe : [Prisma] Error loading .env: Error: ENOENT: no such file or directory, open 
+'D:\MobileApp\Chatbot\chatbot-master\chatbot-saas\apps\api\src\.env'
+At C:\nvm4w\nodejs\npx.ps1:29 char:3
++   & $NODE_EXE $NPX_CLI_JS $args
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([Prisma] Error ...s\api\src\.env':String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+    at Object.readFileSync (node:fs:442:20)
+    at Object.configDotenv (D:\MobileApp\Chatbot\chatbot-master\chatbot-saas\apps\api\node_modules\dotenv\lib\main.js:288:44)
+    at Object.config (D:\MobileApp\Chatbot\chatbot-master\chatbot-saas\apps\api\node_modules\dotenv\lib\main.js:334:25)
+    at dotenv (D:\MobileApp\Chatbot\chatbot-master\chatbot-saas\apps\api\src\lib\prisma.ts:7:23)
+    at Object.<anonymous> (D:\MobileApp\Chatbot\chatbot-master\chatbot-saas\apps\api\src\lib\prisma.ts:29:16)
+    at Module._compile (node:internal/modules/cjs/loader:1554:14)
+    at Object.transformer (D:\MobileApp\Chatbot\chatbot-master\chatbot-saas\node_modules\tsx\dist\register-D46fvsV_.cjs:3:1104)
+    at Module.load (node:internal/modules/cjs/loader:1289:32)
+    at Function._load (node:internal/modules/cjs/loader:1108:12)
+    at TracingChannel.traceSync (node:diagnostics_channel:322:14) {
+  errno: -4058,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: 'D:\\MobileApp\\Chatbot\\chatbot-master\\chatbot-saas\\apps\\api\\src\\.env'
+}
+[Prisma] Using DATABASE_URL: Γ£à Set
+[AI Config] Using embeddings provider: ollama
+============================================================
+TESTING KNOWLEDGE SERVICE DIRECTLY
+============================================================
+
+1. Calling addKnowledge with:
+   - tenantId: test-tenant-123
+   - content: This is test content
+   - source: manual
+
+
+============================================================
+[KnowledgeService] Adding knowledge for tenant test-tenant-123
+[KnowledgeService] Content length: 48 chars
+[KnowledgeService] Source: manual
+============================================================
+
+[Step 1/4] Generating embedding...
+   Content preview: "This is test content for debugging the 500 error..."
+   Γ£à Embedding generated. Vector length: 768
+
+[Step 2/4] Saving to PostgreSQL database...
+   Tenant ID: test-tenant-123
+prisma:error 
+Invalid `prisma.knowledgeChunk.create()` invocation in
+D:\MobileApp\Chatbot\chatbot-master\chatbot-saas\apps\api\src\services\KnowledgeService.ts:38:55
+
+  35 // 2. Save Content to Postgres
+  36 console.log(`[Step 2/4] Saving to PostgreSQL database...`);
+  37 console.log(`   Tenant ID: ${tenantId}`);
+ΓåÆ 38 const chunk = await prisma.knowledgeChunk.create(
+Foreign key constraint violated: `KnowledgeChunk_tenantId_fkey (index)`
+
+============================================================
+Γ¥î ERROR IN KNOWLEDGE SERVICE
+============================================================
+Error Name: PrismaClientKnownRequestError
+Error Message: 
+Invalid `prisma.knowledgeChunk.create()` invocation in
+D:\MobileApp\Chatbot\chatbot-master\chatbot-saas\apps\api\src\services\KnowledgeService.ts:38:55
+
+  35 // 2. Save Content to Postgres
+  36 console.log(`[Step 2/4] Saving to PostgreSQL database...`);
+  37 console.log(`   Tenant ID: ${tenantId}`);
+ΓåÆ 38 const chunk = await prisma.knowledgeChunk.create(
+Foreign key constraint violated: `KnowledgeChunk_tenantId_fkey (index)`
+Error Code: P2003
+
+Full Stack Trace:
+PrismaClientKnownRequestError: 
+Invalid `prisma.knowledgeChunk.create()` invocation in
+D:\MobileApp\Chatbot\chatbot-master\chatbot-saas\apps\api\src\services\KnowledgeService.ts:38:55
+
+  35 // 2. Save Content to Postgres
+  36 console.log(`[Step 2/4] Saving to PostgreSQL database...`);
+  37 console.log(`   Tenant ID: ${tenantId}`);
+ΓåÆ 38 const chunk = await prisma.knowledgeChunk.create(
+Foreign key constraint violated: `KnowledgeChunk_tenantId_fkey (index)`
+    at $n.handleRequestError (D:\MobileApp\Chatbot\chatbot-master\chatbot-saas\node_modules\@prisma\client\runtime\library.js:121:7315)
+    at $n.handleAndLogRequestError 
+(D:\MobileApp\Chatbot\chatbot-master\chatbot-saas\node_modules\@prisma\client\runtime\library.js:121:6623)
+    at $n.request (D:\MobileApp\Chatbot\chatbot-master\chatbot-saas\node_modules\@prisma\client\runtime\library.js:121:6307)
+    at async l (D:\MobileApp\Chatbot\chatbot-master\chatbot-saas\node_modules\@prisma\client\runtime\library.js:130:9633)
+    at async KnowledgeService.addKnowledge 
+(D:\MobileApp\Chatbot\chatbot-master\chatbot-saas\apps\api\src\services\KnowledgeService.ts:38:27)
+    at async testDirectly (D:\MobileApp\Chatbot\chatbot-master\chatbot-saas\apps\api\test_exact_error.ts:14:24)
+============================================================
+
+
+============================================================
+Γ¥î ERROR CAUGHT - THIS IS THE EXACT PROBLEM:
+============================================================
+
+Error Name: PrismaClientKnownRequestError
+
+Error Message: 
+Invalid `prisma.knowledgeChunk.create()` invocation in
+D:\MobileApp\Chatbot\chatbot-master\chatbot-saas\apps\api\src\services\KnowledgeService.ts:38:55
+
+  35 // 2. Save Content to Postgres
+  36 console.log(`[Step 2/4] Saving to PostgreSQL database...`);
+  37 console.log(`   Tenant ID: ${tenantId}`);
+ΓåÆ 38 const chunk = await prisma.knowledgeChunk.create(
+Foreign key constraint violated: `KnowledgeChunk_tenantId_fkey (index)`
+
+Error Code: P2003
+
+Full Stack Trace:
+PrismaClientKnownRequestError: 
+Invalid `prisma.knowledgeChunk.create()` invocation in
+D:\MobileApp\Chatbot\chatbot-master\chatbot-saas\apps\api\src\services\KnowledgeService.ts:38:55
+
+  35 // 2. Save Content to Postgres
+  36 console.log(`[Step 2/4] Saving to PostgreSQL database...`);
+  37 console.log(`   Tenant ID: ${tenantId}`);
+ΓåÆ 38 const chunk = await prisma.knowledgeChunk.create(
+Foreign key constraint violated: `KnowledgeChunk_tenantId_fkey (index)`
+    at $n.handleRequestError (D:\MobileApp\Chatbot\chatbot-master\chatbot-saas\node_modules\@prisma\client\runtime\library.js:121:7315)
+    at $n.handleAndLogRequestError (D:\MobileApp\Chatbot\chatbot-master\chatbot-saas\node_modules\@prisma\client\runtime\library.js:121:6623)
+    at $n.request (D:\MobileApp\Chatbot\chatbot-master\chatbot-saas\node_modules\@prisma\client\runtime\library.js:121:6307)
+    at async l (D:\MobileApp\Chatbot\chatbot-master\chatbot-saas\node_modules\@prisma\client\runtime\library.js:130:9633)
+    at async KnowledgeService.addKnowledge (D:\MobileApp\Chatbot\chatbot-master\chatbot-saas\apps\api\src\services\KnowledgeService.ts:38:27)
+    at async testDirectly (D:\MobileApp\Chatbot\chatbot-master\chatbot-saas\apps\api\test_exact_error.ts:14:24)
+
+============================================================
+
