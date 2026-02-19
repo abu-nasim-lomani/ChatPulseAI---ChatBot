@@ -73,13 +73,13 @@ model KnowledgeChunk {
 }
 
 model User {
-  id        String   @id
+  id        String   @id @default(uuid())
   email     String   @unique
   password  String
   name      String?
   role      String   @default("admin")
   tenantId  String
   createdAt DateTime @default(now())
-  updatedAt DateTime
+  updatedAt DateTime @updatedAt
   Tenant    Tenant   @relation(fields: [tenantId], references: [id])
 }

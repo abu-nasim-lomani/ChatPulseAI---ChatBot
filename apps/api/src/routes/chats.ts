@@ -149,4 +149,22 @@ router.post('/read', async (req: Request, res: Response) => {
     }
 });
 
+// POST /chats/clear-conversation
+router.post('/clear-conversation', async (req: Request, res: Response) => {
+    try {
+        const { sessionId } = req.body;
+
+        if (!sessionId) {
+            res.status(400).json({ status: 'error', message: 'Session ID is required' });
+            return;
+        }
+
+        await ChatService.clearConversation(sessionId);
+        res.json({ status: 'success' });
+    } catch (error) {
+        console.error("Clear Conversation Error:", error);
+        res.status(500).json({ status: 'error', message: error instanceof Error ? error.message : 'Internal Server Error' });
+    }
+});
+
 export default router;

@@ -22,10 +22,19 @@ router.post('/register', async (req, res) => {
         }
 
         // Create Tenant
+        let slug = tenantName.toLowerCase().replace(/\s+/g, '-');
+
+        // Ensure slug uniqueness
+        let existingTenant = await prisma.tenant.findUnique({ where: { slug } });
+        while (existingTenant) {
+            slug = `${tenantName.toLowerCase().replace(/\s+/g, '-')}-${Math.floor(1000 + Math.random() * 9000)}`;
+            existingTenant = await prisma.tenant.findUnique({ where: { slug } });
+        }
+
         const tenant = await prisma.tenant.create({
             data: {
                 name: tenantName,
-                slug: tenantName.toLowerCase().replace(/\s+/g, '-'),
+                slug: slug,
                 systemPrompt: "You are a helpful AI assistant."
             }
         });
@@ -94,16 +103,32 @@ router.get('/me', async (req, res) => {
         const decoded: any = jwt.verify(token, JWT_SECRET);
         const user = await prisma.user.findUnique({
             where: { id: decoded.userId },
-            include: { tenant: true } // Include tenant details
+            include: { Tenant: true } // Include tenant details
         });
 
         if (!user) {
             return res.status(404).json({ error: 'User not found' });
         }
 
-        res.json({ user: { id: user.id, email: user.email, name: user.name, role: user.role, tenantId: user.tenantId, tenant: user.tenant } });
+        res.json({ user: { id: user.id, email: user.email, name: user.name, role: user.role, tenantId: user.tenantId, tenant: user.Tenant } });
     } catch (error) {
         res.status(401).json({ error: 'Invalid token' });
+    }
+});
+
+// Check Tenant Availability
+router.post('/check-tenant', async (req, res) => {
+    try {
+        const { name } = req.body;
+        if (!name) return res.status(400).json({ error: 'Name is required' });
+
+        const slug = name.toLowerCase().replace(/\s+/g, '-');
+        const existingTenant = await prisma.tenant.findUnique({ where: { slug } });
+
+        res.json({ available: !existingTenant, slug });
+    } catch (error) {
+        console.error('Check Tenant error:', error);
+        res.status(500).json({ error: 'Check failed' });
     }
 });
 
