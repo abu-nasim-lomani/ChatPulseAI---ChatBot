@@ -7,6 +7,8 @@ import messageRoutes from './routes/messages';
 import chatRoutes from './routes/chats';
 import knowledgeRoutes from './routes/knowledge';
 import tenantsRoutes from './routes/tenants';
+import messengerRoutes from './routes/messenger'; // Import messengerRoutes
+import integrationRoutes from './routes/integrations'; // Import integrationRoutes
 
 // Load .env from the correct path
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
@@ -37,6 +39,8 @@ app.use('/messages', messageRoutes); // Widget API
 app.use('/chats', chatRoutes);       // Dashboard API
 app.use('/knowledge', knowledgeRoutes); // Knowledge Base API
 app.use('/tenants', tenantsRoutes);     // Tenant Settings API
+app.use('/webhooks/messenger', messengerRoutes); // Messenger Webhook
+app.use('/integrations', integrationRoutes); // Integration API
 
 app.get('/', (req: Request, res: Response) => {
     res.send('SaaS Chatbot API is running!');

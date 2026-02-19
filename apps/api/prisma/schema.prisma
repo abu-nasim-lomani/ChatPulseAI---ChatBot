@@ -20,6 +20,21 @@ model Tenant {
   endUsers        EndUser[]
   knowledgeChunks KnowledgeChunk[]
   User            User[]
+  integrations    Integration[]
+}
+
+model Integration {
+  id          String   @id @default(uuid())
+  tenantId    String
+  provider    String   // "messenger", "whatsapp"
+  pageId      String?  // Facebook Page ID or WhatsApp Phone Number ID
+  accessToken String?  // Long-lived Page Access Token
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  
+  @@unique([tenantId, provider, pageId])
 }
 
 model EndUser {

@@ -12,6 +12,7 @@ const chatModel = getChatModel(AI_PROVIDER);
 export class ChatService {
     static async processMessage(apiKey: string, text: string, senderId: string = 'visitor') {
 
+
         // 1. Find Tenant
         // Try to find by apiKey first, then by id (to support both)
         let tenant = await prisma.tenant.findUnique({

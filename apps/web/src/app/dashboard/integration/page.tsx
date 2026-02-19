@@ -129,6 +129,11 @@ export default function IntegrationPage() {
                     </div>
                 </div>
 
+                {/* Middle Column - Facebook Integration */}
+                <div className="space-y-6">
+                    <FacebookIntegration tenantId={user.tenantId} />
+                </div>
+
                 {/* Right Column - Quick Actions */}
                 <div className="space-y-5">
 
@@ -176,6 +181,141 @@ export default function IntegrationPage() {
                     </div>
 
                 </div>
+            </div>
+        </div>
+    );
+}
+
+function FacebookIntegration({ tenantId }: { tenantId: string }) {
+    const [pageId, setPageId] = useState('');
+    const [accessToken, setAccessToken] = useState('');
+    const [loading, setLoading] = useState(false);
+    const [connected, setConnected] = useState(false);
+    const [pageName, setPageName] = useState(''); // Store connected page ID for display
+
+    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+
+    // Check status
+    const [checking, setChecking] = useState(true);
+    useState(() => {
+        const checkStatus = async () => {
+            try {
+                const res = await import('axios').then(a => a.default.get(`${API_URL}/integrations/messenger/${tenantId}`));
+                if (res.data.connected) {
+                    setConnected(true);
+                    setPageName(res.data.pageId);
+                }
+            } catch (e) {
+                console.error("Failed to check status", e);
+            } finally {
+                setChecking(false);
+            }
+        };
+        checkStatus();
+    });
+
+    const handleConnect = async () => {
+        if (!pageId || !accessToken) return alert('Please fill in all fields');
+        setLoading(true);
+        try {
+            const axios = (await import('axios')).default;
+            await axios.post(`${API_URL}/integrations/messenger`, {
+                tenantId,
+                pageId,
+                accessToken
+            });
+            setConnected(true);
+            setPageName(pageId);
+            setPageId('');
+            setAccessToken('');
+            alert('Connected successfully!');
+        } catch (err: unknown) {
+            const errorMessage = (err as any).response?.data?.message || (err as Error).message || 'Unknown error';
+            alert('Failed to connect: ' + errorMessage);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleDisconnect = async () => {
+        if (!confirm('Are you sure you want to disconnect?')) return;
+        setLoading(true);
+        try {
+            const axios = (await import('axios')).default;
+            await axios.post(`${API_URL}/integrations/messenger/disconnect`, { tenantId });
+            setConnected(false);
+            setPageName('');
+        } catch (err: unknown) {
+            console.error(err);
+            alert('Failed to disconnect');
+        } finally {
+            setLoading(false);
+        }
+    }
+
+    if (checking) return <div className="animate-pulse h-48 bg-gray-100 rounded-xl"></div>;
+
+    return (
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+            <div className="p-4 border-b border-gray-50 bg-blue-50/30 flex justify-between items-center">
+                <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center shadow-sm border border-blue-200">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"></path></svg>
+                    </div>
+                    <h2 className="text-sm font-bold text-gray-900">Facebook Messenger</h2>
+                </div>
+                {connected && <span className="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-bold border border-green-200">Active</span>}
+            </div>
+
+            <div className="p-6">
+                {!connected ? (
+                    <div className="space-y-4">
+                        <p className="text-xs text-gray-600">Connect your Facebook Page to reply to messages directly from this dashboard.</p>
+
+                        <div>
+                            <label className="block text-[10px] font-bold text-gray-700 uppercase mb-1">Page ID</label>
+                            <input
+                                type="text"
+                                value={pageId}
+                                onChange={e => setPageId(e.target.value)}
+                                className="w-full text-xs border border-gray-200 rounded-lg px-3 py-2 outline-none focus:ring-1 focus:ring-blue-500"
+                                placeholder="e.g. 1000636..."
+                            />
+                        </div>
+
+                        <div>
+                            <label className="block text-[10px] font-bold text-gray-700 uppercase mb-1">Access Token</label>
+                            <input
+                                type="password"
+                                value={accessToken}
+                                onChange={e => setAccessToken(e.target.value)}
+                                className="w-full text-xs border border-gray-200 rounded-lg px-3 py-2 outline-none focus:ring-1 focus:ring-blue-500"
+                                placeholder="Long-lived Page Access Token"
+                            />
+                        </div>
+
+                        <button
+                            onClick={handleConnect}
+                            disabled={loading}
+                            className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition shadow-sm disabled:opacity-50"
+                        >
+                            {loading ? 'Connecting...' : 'Connect Page'}
+                        </button>
+                    </div>
+                ) : (
+                    <div>
+                        <div className="bg-green-50 border border-green-100 rounded-lg p-3 mb-4">
+                            <p className="text-xs text-green-800 font-medium">Connected to Page ID: <b>{pageName}</b></p>
+                        </div>
+                        <button
+                            onClick={handleDisconnect}
+                            disabled={loading}
+                            className="w-full py-2 bg-white border border-gray-200 text-red-600 hover:bg-red-50 text-xs font-bold rounded-lg transition"
+                        >
+                            {loading ? 'Disconnecting...' : 'Disconnect Page'}
+                        </button>
+                    </div>
+                )}
             </div>
         </div>
     );
