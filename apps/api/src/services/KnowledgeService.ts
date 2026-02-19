@@ -133,7 +133,71 @@ export class KnowledgeService {
         return await prisma.knowledgeChunk.findMany({
             where: { tenantId },
             orderBy: { createdAt: 'desc' },
+            distinct: ['source'],
             take: 50
+        });
+    }
+    async deleteKnowledgeBySource(tenantId: string, source: string) {
+        // 1. Find all chunks for this source
+        const chunks = await prisma.knowledgeChunk.findMany({
+            where: { tenantId, source }
+        });
+
+        if (chunks.length === 0) return 0;
+
+        const index = pinecone.index(this.indexName);
+        const vectorIds = chunks.map(c => c.vectorId || c.id).filter(id => id);
+
+        // 2. Delete from Pinecone
+        if (vectorIds.length > 0) {
+            try {
+                // Delete in batches of 1000 if needed, but for now simple
+                await index.deleteMany(vectorIds);
+            } catch (e) {
+                console.error("Pinecone delete failed", e);
+            }
+        }
+
+        // 3. Delete from DB
+        const result = await prisma.knowledgeChunk.deleteMany({
+            where: { tenantId, source }
+        });
+
+        return result.count;
+    }
+
+    async deleteKnowledge(chunkId: string) {
+        // 1. Get Chunk to find vectorId
+        const chunk = await prisma.knowledgeChunk.findUnique({
+            where: { id: chunkId }
+        });
+
+        if (!chunk) throw new Error("Chunk not found");
+
+        const index = pinecone.index(this.indexName);
+
+        // 2. Delete from Pinecone
+        try {
+            if (chunk.vectorId) {
+                await index.deleteMany([chunk.vectorId]);
+            } else {
+                await index.deleteMany([chunk.id]);
+            }
+        } catch (e) {
+            console.error("Pinecone delete failed", e);
+        }
+
+        // 3. Delete from DB
+        await prisma.knowledgeChunk.delete({
+            where: { id: chunkId }
+        });
+
+        return { success: true };
+    }
+
+    async getKnowledge(chunkId: string) {
+        return await prisma.knowledgeChunk.findUnique({
+            where: { id: chunkId }
         });
     }
 }

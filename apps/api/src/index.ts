@@ -26,8 +26,12 @@ app.use(cors({
 }));
 app.use(express.json());
 
+import authRoutes from './routes/auth';
+
+// ... (existing imports)
+
 // Routes
-// Routes
+app.use('/auth', authRoutes);       // Authentication API
 app.use('/health', healthRoutes);
 app.use('/messages', messageRoutes); // Widget API
 app.use('/chats', chatRoutes);       // Dashboard API

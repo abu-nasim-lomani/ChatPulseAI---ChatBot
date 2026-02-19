@@ -9,14 +9,43 @@ export default function RegisterPage() {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [tenantName, setTenantName] = useState('');
+    const [tenantError, setTenantError] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
     const { login } = useAuth();
     const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
+    const handleTenantChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const val = e.target.value;
+        setTenantName(val);
+        setTenantError('');
+
+        if (val.length > 2) {
+            try {
+                const res = await fetch(`${API_URL}/auth/check-tenant`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: val }),
+                });
+                const data = await res.json();
+                if (!data.available) {
+                    setTenantError('Company name is already taken. Please choose another.');
+                }
+            } catch (err) {
+                console.error("Failed to check tenant availability", err);
+            }
+        }
+    };
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setError('');
+
+        if (tenantError) {
+            setError("Please fix the errors before submitting.");
+            return;
+        }
+
         setLoading(true);
 
         try {
@@ -33,8 +62,12 @@ export default function RegisterPage() {
             }
 
             login(data.token, data.user);
-        } catch (err: any) {
-            setError(err.message);
+        } catch (err: unknown) {
+            if (err instanceof Error) {
+                setError(err.message);
+            } else {
+                setError('Registration failed');
+            }
         } finally {
             setLoading(false);
         }
@@ -97,10 +130,15 @@ export default function RegisterPage() {
                                     type="text"
                                     required
                                     value={tenantName}
-                                    onChange={(e) => setTenantName(e.target.value)}
+                                    onChange={handleTenantChange}
                                     placeholder="e.g. Acme Corp"
-                                    className="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition-all"
+                                    className={`appearance-none block w-full px-3 py-2 border ${tenantError ? 'border-red-300 focus:ring-red-500 focus:border-red-500' : 'border-gray-300 focus:ring-indigo-500 focus:border-indigo-500'} rounded-md shadow-sm placeholder-gray-400 focus:outline-none sm:text-sm transition-all`}
                                 />
+                                {tenantError && (
+                                    <p className="mt-2 text-sm text-red-600" id="tenant-error">
+                                        {tenantError}
+                                    </p>
+                                )}
                             </div>
                         </div>
 

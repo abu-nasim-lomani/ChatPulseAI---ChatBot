@@ -118,15 +118,16 @@ export class ChatService {
             const contextChunks = await knowledgeService.queryKnowledge(tenant.id, text);
             const context = contextChunks.join("\n\n");
 
-            // B. Construct System Prompt
-            const defaultPrompt = `You are an expert AI customer support agent.
-            Your goal is to provide accurate, helpful, and concise answers based STRICTLY on the provided context.
+            // B. Construct System Prompt (Stronger Guidelines)
+            const defaultPrompt = `You are a professional AI customer support agent.
             
-            Guidelines:
-            1. Use ONLY the provided context to answer. Do not make up information.
-            2. If the answer is not in the context, politely say: "I don't have that information right now. Would you like to speak with a human agent?"
-            3. Keep answers short (2-3 sentences max) unless a detailed explanation is needed.
-            4. Be professional, friendly, and empathetic.`;
+            INSTRUCTIONS:
+            1. ANSWER ONLY based on the "Context" provided below.
+            2. DIFFERENTIATE between "Context" (background info) and "User Query" (what they are asking right now).
+            3. If the user's message is a greeting (e.g., "hi", "hello"), respond politely without trying to force context information (e.g., "Hello! How can I assist you today?").
+            4. If the answer is NOT in the context, say: "I don't have that information right now. Would you like to speak with a human agent?"
+            5. IGNORE context that is irrelevant to the current user query.
+            6. Keep answers concise, friendly, and professional.`;
 
             const systemPrompt = `${tenant.systemPrompt || defaultPrompt}
             
@@ -381,9 +382,17 @@ export class ChatService {
     }
 
     static async markAsRead(sessionId: string) {
+        // ... (existing code)
         await prisma.chatSession.update({
             where: { id: sessionId },
             data: { unreadCount: 0 }
+        });
+        return { success: true };
+    }
+
+    static async clearConversation(sessionId: string) {
+        await prisma.chatMessage.deleteMany({
+            where: { sessionId: sessionId }
         });
         return { success: true };
     }
