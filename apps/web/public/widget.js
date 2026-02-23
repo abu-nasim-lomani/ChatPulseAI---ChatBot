@@ -1,30 +1,83 @@
-(function () {
-    console.log("Chatbot Widget Loading (Premium v3)...");
+(async function () {
+    console.log("Chatbot Widget Loading (Premium Customization)...");
 
     const config = window.ChatbotConfig;
-    if (!config) {
-        console.error("ChatbotConfig not found!");
+    if (!config || !config.apiKey) {
+        console.error("ChatbotConfig with apiKey not found!");
         return;
     }
 
-    // 1. Inject CSS (Modern Messenger Style)
+    // Default configuration
+    let widgetSettings = {
+        themeColor: '#4F46E5',
+        fontColor: '#ffffff',
+        fontFamily: 'Inter',
+        widgetPosition: 'bottom-right',
+        botName: 'Assistant',
+        botAvatarType: 'emoji',
+        botAvatar: '🤖',
+        enableHumanAgent: true,
+        suggestedMessages: '',
+        launcherText: 'Hey, need help? 💬',
+        removeBranding: false,
+        // Advanced
+        autoShowDelay: 0,
+        themeMode: 'auto', // light, dark, auto
+        paddingOffset: { x: 24, y: 24 },
+        enableVoiceInput: false
+    };
+
+    const HOST = 'http://127.0.0.1:3001'; // Default to localhost for now
+    try {
+        const res = await fetch(`${HOST}/widget/config?tenantId=${config.apiKey}`);
+        if (res.ok) {
+            const data = await res.json();
+            if (data.config && Object.keys(data.config).length > 0) {
+                widgetSettings = { ...widgetSettings, ...data.config };
+            }
+        }
+    } catch {
+        console.warn("Failed to load widget customization. Using defaults.");
+    }
+
+    // Normalize paddingOffset in case it comes as a parsed JSON object or is missing
+    if (widgetSettings.paddingOffset && typeof widgetSettings.paddingOffset === 'object') {
+        widgetSettings.paddingOffset = {
+            x: Number(widgetSettings.paddingOffset.x ?? 24),
+            y: Number(widgetSettings.paddingOffset.y ?? 24)
+        };
+    } else {
+        widgetSettings.paddingOffset = { x: 24, y: 24 };
+    }
+
+    // Detect system theme for 'auto' mode
+    const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const isDark = widgetSettings.themeMode === 'dark' || (widgetSettings.themeMode === 'auto' && prefersDark);
+
+    // 1. Inject CSS (Modern Messenger Style + Advanced Configs)
     const style = document.createElement('style');
     style.innerHTML = `
         :root {
-            --primary-color: #4F46E5; /* Indigo-600 */
-            --primary-gradient: linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%);
-            --secondary-color: #F3F4F6;
-            --text-color: #1F2937;
-            --bot-bubble-bg: #F3F4F6;
-            --user-bubble-bg: #4F46E5;
-            --font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            --primary-color: ${widgetSettings.themeColor};
+            --primary-gradient: linear-gradient(135deg, ${widgetSettings.themeColor} 0%, ${widgetSettings.themeColor}E6 100%);
+            --secondary-color: ${isDark ? '#374151' : '#F3F4F6'};
+            --bg-color: ${isDark ? '#1F2937' : '#FFFFFF'};
+            --bg-secondary: ${isDark ? '#111827' : '#F9FAFB'};
+            --text-color: ${isDark ? '#F9FAFB' : '#1F2937'};
+            --text-muted: ${isDark ? '#9CA3AF' : '#6B7280'};
+            --border-color: ${isDark ? '#374151' : '#E5E7EB'};
+            --bot-bubble-bg: ${isDark ? '#374151' : '#F3F4F6'};
+            --user-bubble-bg: ${widgetSettings.themeColor};
+            --font-family: ${widgetSettings.fontFamily === 'system-ui' ? 'system-ui, -apple-system, sans-serif' : `'${widgetSettings.fontFamily}', sans-serif`};
+            --padding-x: ${widgetSettings.paddingOffset?.x ?? 24}px;
+            --padding-y: ${widgetSettings.paddingOffset?.y ?? 24}px;
         }
 
         /* Float Button */
         .sb-widget-button {
             position: fixed;
-            bottom: 24px;
-            right: 24px;
+            bottom: var(--padding-y);
+            ${widgetSettings.widgetPosition === 'bottom-left' ? 'left: var(--padding-x);' : 'right: var(--padding-x);'}
             width: 60px;
             height: 60px;
             background: var(--primary-gradient);
@@ -51,12 +104,12 @@
         /* Chat Window */
         .sb-chat-window {
             position: fixed;
-            bottom: 100px;
-            right: 24px;
+            bottom: calc(var(--padding-y) + 76px);
+            ${widgetSettings.widgetPosition === 'bottom-left' ? 'left: var(--padding-x);' : 'right: var(--padding-x);'}
             width: 380px;
             height: 650px;
             max-height: 80vh;
-            background-color: #fff;
+            background-color: var(--bg-color);
             border-radius: 20px;
             box-shadow: 0 12px 48px rgba(0,0,0,0.12);
             z-index: 99999;
@@ -81,18 +134,18 @@
             height: 100vh;
             max-height: 100vh;
             bottom: 0;
-            right: 0;
+            ${widgetSettings.widgetPosition === 'bottom-left' ? 'left: 0;' : 'right: 0;'}
             border-radius: 0;
         }
         
         /* Header */
         .sb-header {
-            background: #fff;
+            background: var(--bg-color);
             padding: 16px 20px;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            border-bottom: 1px solid #F3F4F6;
+            border-bottom: 1px solid var(--border-color);
         }
         .sb-header-info {
             display: flex;
@@ -100,15 +153,22 @@
             gap: 12px;
         }
         .sb-header-avatar {
-            width: 36px;
-            height: 36px;
-            background: var(--primary-gradient);
+            width: 40px;
+            height: 40px;
             border-radius: 50%;
+            background: var(--secondary-color);
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 18px;
-            color: white;
+            font-size: 20px;
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+        .sb-header-avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 50%;
         }
         .sb-header-text {
             display: flex;
@@ -144,7 +204,7 @@
         .sb-control-btn {
             background: transparent;
             border: none;
-            color: #6B7280;
+            color: var(--text-muted);
             width: 28px;
             height: 28px;
             border-radius: 6px;
@@ -155,8 +215,8 @@
             transition: background 0.2s;
         }
         .sb-control-btn:hover {
-            background: #F3F4F6;
-            color: #111827;
+            background: var(--secondary-color);
+            color: var(--text-color);
         }
         .sb-control-icon {
             width: 18px;
@@ -168,7 +228,7 @@
         .sb-messages {
             flex: 1;
             padding: 20px;
-            background-color: #fff;
+            background-color: var(--bg-secondary);
             overflow-y: auto;
             display: flex;
             flex-direction: column;
@@ -189,6 +249,7 @@
         .sb-message-group.user {
             align-self: flex-end;
             flex-direction: row-reverse;
+            margin-left: auto;
         }
 
         .sb-avatar-small {
@@ -203,6 +264,14 @@
             font-size: 14px;
             color: white;
             margin-bottom: 4px;
+            overflow: hidden;
+        }
+
+        .sb-avatar-small img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 50%;
         }
 
         .sb-bubble {
@@ -222,7 +291,7 @@
 
         .sb-message-group.user .sb-bubble {
             background: var(--primary-gradient);
-            color: white;
+            color: ${widgetSettings.fontColor || '#ffffff'};
             border-bottom-right-radius: 4px;
             box-shadow: 0 4px 12px rgba(79, 70, 229, 0.2);
         }
@@ -230,12 +299,12 @@
         /* Input Area (Floating Pill) */
         .sb-input-container {
             padding: 16px 20px;
-            background: white;
-            border-top: 1px solid transparent; /* Removed border specifically */
+            background: var(--bg-color);
+            border-top: 1px solid var(--border-color);
         }
         .sb-input-wrapper {
-            background: #F9FAFB;
-            border: 1px solid #E5E7EB;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
             border-radius: 28px;
             padding: 4px 8px 4px 16px;
             display: flex;
@@ -246,7 +315,7 @@
         .sb-input-wrapper:focus-within {
             border-color: var(--primary-color);
             box-shadow: 0 4px 12px rgba(79, 70, 229, 0.1);
-            background: white;
+            background: var(--bg-color);
         }
         .sb-input {
             flex: 1;
@@ -272,6 +341,29 @@
         .sb-send-btn:hover {
             transform: scale(1.05);
         }
+        .sb-mic-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: color 0.2s;
+        }
+        .sb-mic-btn:hover {
+            color: var(--primary-color);
+        }
+        .sb-mic-btn.recording {
+            color: #ef4444;
+            animation: pulse-red 1.5s infinite;
+        }
+        @keyframes pulse-red {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.2); }
+            100% { transform: scale(1); }
+        }
         .sb-send-icon {
             width: 16px;
             height: 16px;
@@ -282,9 +374,9 @@
         /* Agent Button */
         .sb-agent-pill {
             margin: 0 auto 10px auto;
-            background: #EEF2FF;
-            color: #4F46E5;
-            border: 1px solid #E0E7FF;
+            background: var(--secondary-color);
+            color: var(--primary-color);
+            border: 1px solid var(--border-color);
             padding: 6px 16px;
             border-radius: 20px;
             font-size: 12px;
@@ -296,7 +388,7 @@
             width: fit-content;
         }
         .sb-agent-pill:hover {
-            background: #E0E7FF;
+            background: var(--border-color);
         }
         .sb-agent-pill:disabled {
             opacity: 0.6;
@@ -335,70 +427,264 @@
             <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/>
         </svg>
     `;
+
+    // Add Launcher Tooltip
+    let launcherTooltip = null;
+    if (widgetSettings.launcherText) {
+        launcherTooltip = document.createElement('div');
+        launcherTooltip.innerHTML = widgetSettings.launcherText;
+        launcherTooltip.style.cssText = `
+            position: fixed;
+            bottom: calc(var(--padding-y) + 14px);
+            ${widgetSettings.widgetPosition === 'bottom-left' ? 'left: calc(var(--padding-x) + 71px);' : 'right: calc(var(--padding-x) + 71px);'}
+            background: var(--bg-color);
+            padding: 8px 16px;
+            border-radius: 20px;
+            box-shadow: 0 4px 14px rgba(0,0,0,0.1);
+            font-family: var(--font-family);
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-color);
+            z-index: 99998;
+            transition: opacity 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+            pointer-events: none;
+            border: 1px solid #F3F4F6;
+        `;
+        document.body.appendChild(launcherTooltip);
+    }
+
     document.body.appendChild(button);
+
+    // Dynamic Avatar Generator
+    const avatarHTML = widgetSettings.botAvatarType === 'image' && widgetSettings.botAvatar.startsWith('http')
+        ? `<img src="${widgetSettings.botAvatar}" alt="Bot Avatar" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;" />`
+        : widgetSettings.botAvatar;
 
     // 3. Chat Window (Redesigned)
     const windowDiv = document.createElement('div');
     windowDiv.className = 'sb-chat-window';
+
+    // Check if lead capture is needed
+    const needsLeadCapture = widgetSettings.leadCaptureEnabled && !localStorage.getItem('chat_lead_submitted');
+
+    let leadCaptureHTML = '';
+    if (needsLeadCapture) {
+        let fieldsHTML = '';
+        if (widgetSettings.leadCaptureName) fieldsHTML += `<input type="text" id="sb-lead-name" placeholder="Your Name *" required class="sb-lead-input">`;
+        if (widgetSettings.leadCaptureEmail) fieldsHTML += `<input type="email" id="sb-lead-email" placeholder="Email Address *" required class="sb-lead-input">`;
+        if (widgetSettings.leadCapturePhone) fieldsHTML += `<input type="tel" id="sb-lead-phone" placeholder="Phone Number *" required class="sb-lead-input">`;
+        if (widgetSettings.leadCaptureCompany) fieldsHTML += `<input type="text" id="sb-lead-company" placeholder="Company Name" class="sb-lead-input">`;
+
+        // Render dynamic custom fields
+        if (Array.isArray(widgetSettings.leadCaptureCustomFields)) {
+            widgetSettings.leadCaptureCustomFields.forEach(field => {
+                const requiredAttr = field.required ? 'required' : '';
+                const placeholder = field.required ? `${field.label} *` : field.label;
+                const fieldId = `sb-lead-custom-${field.id}`;
+                fieldsHTML += `<input type="text" id="${fieldId}" data-custom-label="${field.label}" placeholder="${placeholder}" ${requiredAttr} class="sb-lead-input sb-lead-custom-input">`;
+            });
+        }
+
+        leadCaptureHTML = `
+            <div id="sb-lead-overlay" style="position: absolute; top: 60px; left: 0; right: 0; bottom: 0; background: var(--bg-color); z-index: 50; display: flex; flex-direction: column; padding: 24px; text-align: center;">
+                <div style="font-size: 14px; font-weight: 600; color: var(--text-color); margin-bottom: 20px;">
+                    ${widgetSettings.leadCaptureTitle || 'Let us know how to contact you'}
+                </div>
+                <form id="sb-lead-form" style="display: flex; flex-direction: column; gap: 12px; flex: 1; overflow-y: auto;">
+                    ${fieldsHTML}
+                    <button type="submit" id="sb-lead-submit" style="margin-top: auto; background: var(--primary-color); color: white; border: none; padding: 12px; border-radius: 8px; font-weight: bold; cursor: pointer; transition: opacity 0.2s;">
+                        Start Chat
+                    </button>
+                    <div id="sb-lead-error" style="color: #ef4444; font-size: 12px; margin-top: 8px; display: none;">Error submitting form</div>
+                </form>
+            </div>
+        `;
+
+        // Add Lead specific CSS
+        style.innerHTML += `
+            .sb-lead-input {
+                width: 100%;
+                padding: 10px 14px;
+                border: 1px solid var(--border-color);
+                border-radius: 8px;
+                background: var(--bg-secondary);
+                color: var(--text-color);
+                font-size: 13px;
+                font-family: inherit;
+                outline: none;
+                transition: border-color 0.2s;
+                box-sizing: border-box;
+            }
+            .sb-lead-input:focus {
+                border-color: var(--primary-color);
+            }
+        `;
+    }
+
     windowDiv.innerHTML = `
         <div class="sb-header">
             <div class="sb-header-info">
-                <div class="sb-header-avatar">🤖</div>
+                <div class="sb-header-avatar">${avatarHTML}</div>
                 <div class="sb-header-text">
-                    <div class="sb-header-title">Assistant</div>
+                    <div class="sb-header-title">${widgetSettings.botName}</div>
                     <div class="sb-header-status">Online</div>
                 </div>
             </div>
             <div class="sb-controls">
-                <button class="sb-control-btn" id="sb-minimize" title="Minimize">
-                    <svg class="sb-control-icon" viewBox="0 0 24 24"><path d="M6 11h12v2H6z"/></svg>
-                </button>
-                <button class="sb-control-btn" id="sb-maximize" title="Maximize">
-                    <svg class="sb-control-icon" viewBox="0 0 24 24"><path d="M4 4h16v16H4V4zm2 2v12h12V6H6z"/></svg>
+                <button class="sb-control-btn" id="sb-refresh" title="Restart Chat">
+                    <svg class="sb-control-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
                 </button>
                 <button class="sb-control-btn" id="sb-close" title="Close">
-                   <svg class="sb-control-icon" viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                   <svg class="sb-control-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 18L18 6M6 6l12 12"/></svg>
                 </button>
             </div>
         </div>
-        
+        ${leadCaptureHTML}
         <div id="sb-status-banner" style="display: none;"></div>
         
         <div class="sb-messages" id="sb-messages">
             <!-- Messages go here -->
-            <div class="sb-message-group bot sb-anim-pop">
-                <div class="sb-avatar-small">🤖</div>
-                <div class="sb-bubble">Hello! 👋 How can I help you today?</div>
-            </div>
         </div>
 
+        ${widgetSettings.enableHumanAgent ? `
         <div style="text-align: center; padding: 0 20px;">
              <button class="sb-agent-pill" id="sb-agent-btn">Speak to Human Agent</button>
-        </div>
+        </div>` : ''}
 
         <div class="sb-input-container">
             <div class="sb-input-wrapper">
-                <input type="text" class="sb-input" placeholder="Type a message..." />
-                <button class="sb-send-btn">
+                <input type="text" class="sb-input" placeholder="Type a message..." ${needsLeadCapture ? 'disabled' : ''} />
+                ${widgetSettings.enableVoiceInput ? `
+                <button class="sb-mic-btn" id="sb-mic-btn" title="Voice Input">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 18px; height: 18px;"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
+                </button>` : ''}
+                <button class="sb-send-btn" ${needsLeadCapture ? 'disabled style="opacity:0.5"' : ''}>
                     <svg class="sb-send-icon" viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
                 </button>
             </div>
+            ${!widgetSettings.removeBranding ? `<div style="text-align: center; margin-top: 8px; font-size: 10px; color: var(--text-muted); display: flex; align-items: center; justify-content: center; gap: 4px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path></svg>Powered by ChatPulse AI</div>` : ''}
         </div>
     `;
     document.body.appendChild(windowDiv);
 
+    // Render Suggested Messages - reusable, with dismiss button
+    function buildSuggestedMessages() {
+        // Remove existing container if any
+        const existing = windowDiv.querySelector('.sb-suggested-container');
+        if (existing) existing.remove();
+
+        if (!widgetSettings.suggestedMessages) return;
+        const messages = widgetSettings.suggestedMessages.split('\n').filter(m => m.trim() !== '');
+        if (messages.length === 0) return;
+
+        const container = document.createElement('div');
+        container.className = 'sb-suggested-container';
+        container.style.cssText = 'padding: 8px 20px 10px; display: flex; flex-direction: column; gap: 6px;';
+
+        // Header row with label and dismiss button
+        const headerRow = document.createElement('div');
+        headerRow.style.cssText = 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;';
+        headerRow.innerHTML = `
+            <span style="font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;">Quick Replies</span>
+            <button id="sb-dismiss-suggestions" title="Hide suggestions" style="background: transparent; border: none; cursor: pointer; color: var(--text-muted); display: flex; align-items: center; padding: 2px;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
+        `;
+        container.appendChild(headerRow);
+
+        // Chips row
+        const chipsRow = document.createElement('div');
+        chipsRow.style.cssText = 'display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end;';
+
+        messages.forEach(msg => {
+            const btn = document.createElement('button');
+            btn.className = 'sb-suggested-btn';
+            btn.textContent = msg;
+            btn.style.cssText = 'background: var(--bg-color); border: 1px solid var(--primary-color); color: var(--primary-color); padding: 6px 14px; border-radius: 20px; font-size: 12px; cursor: pointer; transition: all 0.2s; font-family: var(--font-family); box-shadow: 0 1px 2px rgba(0,0,0,0.05);';
+            btn.onmouseover = () => { btn.style.background = 'var(--primary-color)'; btn.style.color = 'white'; };
+            btn.onmouseout = () => { btn.style.background = 'var(--bg-color)'; btn.style.color = 'var(--primary-color)'; };
+            btn.onclick = () => window.sbSendSuggestedText(msg);
+            chipsRow.appendChild(btn);
+        });
+
+        container.appendChild(chipsRow);
+
+        const inputContainer = windowDiv.querySelector('.sb-input-container');
+        windowDiv.insertBefore(container, inputContainer);
+
+        // Wire up dismiss button AFTER inserting into DOM
+        const dismissBtn = container.querySelector('#sb-dismiss-suggestions');
+        if (dismissBtn) {
+            dismissBtn.addEventListener('click', () => {
+                container.remove();
+            });
+        }
+    }
+
+    buildSuggestedMessages();
+
+    // Global method for suggested text
+    window.sbSendSuggestedText = function (text) {
+        const inputField = windowDiv.querySelector('.sb-input');
+        if (inputField) {
+            inputField.value = text;
+            handleSend();
+        }
+    };
+
     // 4. Logic & Features
     let isOpen = false;
-    let isMaximized = false;
 
     // Elements
     const input = windowDiv.querySelector('input');
     const messagesDiv = windowDiv.querySelector('#sb-messages');
     const agentBtn = windowDiv.querySelector('#sb-agent-btn');
     const statusBanner = windowDiv.querySelector('#sb-status-banner');
-    const btnMinimize = windowDiv.querySelector('#sb-minimize');
-    const btnMaximize = windowDiv.querySelector('#sb-maximize');
+    const btnRefresh = windowDiv.querySelector('#sb-refresh');
     const btnClose = windowDiv.querySelector('#sb-close');
+    const micBtn = windowDiv.querySelector('#sb-mic-btn');
+
+    // Voice Input Logic (Web Speech API)
+    if (micBtn && widgetSettings.enableVoiceInput) {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (SpeechRecognition) {
+            const recognition = new SpeechRecognition();
+            recognition.continuous = false;
+            recognition.interimResults = false;
+
+            recognition.onstart = function () {
+                micBtn.classList.add('recording');
+                input.placeholder = "Listening...";
+            };
+
+            recognition.onresult = function (event) {
+                const transcript = event.results[0][0].transcript;
+                input.value = transcript;
+            };
+
+            recognition.onerror = function (event) {
+                console.error("Speech recognition error", event.error);
+                micBtn.classList.remove('recording');
+                input.placeholder = "Type a message...";
+            };
+
+            recognition.onend = function () {
+                micBtn.classList.remove('recording');
+                input.placeholder = "Type a message...";
+            };
+
+            micBtn.addEventListener('click', () => {
+                if (micBtn.classList.contains('recording')) {
+                    recognition.stop();
+                } else {
+                    recognition.start();
+                }
+            });
+        } else {
+            console.warn("Web Speech API not supported in this browser.");
+            micBtn.style.display = 'none';
+        }
+    }
 
     // Visitor Logic
     let visitorId = localStorage.getItem('chat_visitor_id');
@@ -407,68 +693,152 @@
         localStorage.setItem('chat_visitor_id', visitorId);
     }
 
+    // Lead Capture Submission Logic
+    const leadForm = windowDiv.querySelector('#sb-lead-form');
+    if (leadForm) {
+        leadForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const submitBtn = leadForm.querySelector('#sb-lead-submit');
+            const errorDiv = leadForm.querySelector('#sb-lead-error');
+
+            const payload = {
+                tenantId: config.apiKey,
+                sessionId: localStorage.getItem('chat_session_id') || null,
+                source: 'widget'
+            };
+
+            const nameInput = leadForm.querySelector('#sb-lead-name');
+            const emailInput = leadForm.querySelector('#sb-lead-email');
+            const phoneInput = leadForm.querySelector('#sb-lead-phone');
+            const companyInput = leadForm.querySelector('#sb-lead-company');
+
+            if (nameInput) payload.name = nameInput.value;
+            if (emailInput) payload.email = emailInput.value;
+            if (phoneInput) payload.phone = phoneInput.value;
+            if (companyInput) payload.company = companyInput.value;
+
+            // Collect Custom Fields Data
+            const customInputs = leadForm.querySelectorAll('.sb-lead-custom-input');
+            if (customInputs.length > 0) {
+                payload.customData = {};
+                customInputs.forEach(input => {
+                    const label = input.getAttribute('data-custom-label');
+                    if (label) {
+                        payload.customData[label] = input.value;
+                    }
+                });
+            }
+
+            submitBtn.textContent = 'Starting...';
+            submitBtn.style.opacity = '0.7';
+            errorDiv.style.display = 'none';
+
+            try {
+                const response = await fetch(`${HOST}/widget/lead`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) throw new Error('Failed to submit');
+
+                // Success
+                localStorage.setItem('chat_lead_submitted', 'true');
+                const overlay = windowDiv.querySelector('#sb-lead-overlay');
+                if (overlay) overlay.remove();
+
+                // Unlock inputs
+                input.disabled = false;
+                const sendBtn = windowDiv.querySelector('.sb-send-btn');
+                if (sendBtn) {
+                    sendBtn.disabled = false;
+                    sendBtn.style.opacity = '1';
+                }
+
+                // Show welcome message OR auto-trigger first message
+                addMessage("Thank you! How can we help you today?", 'bot');
+                input.focus();
+
+            } catch (err) {
+                console.error("Lead submission error:", err);
+                submitBtn.textContent = 'Start Chat';
+                submitBtn.style.opacity = '1';
+                errorDiv.textContent = 'Submission failed. Please try again.';
+                errorDiv.style.display = 'block';
+            }
+        });
+    }
+
     // Toggle Chat
     function toggleChat() {
         isOpen = !isOpen;
         windowDiv.classList.toggle('active', isOpen);
+        if (launcherTooltip) {
+            launcherTooltip.style.opacity = isOpen ? '0' : '1';
+        }
         if (isOpen) {
             input.focus();
             scrollToBottom();
         }
     }
 
-    // Maximize/Minimize
-    function toggleMaximize() {
-        isMaximized = !isMaximized;
-        windowDiv.classList.toggle('full-screen', isMaximized);
-        // Clean up icons or tooltip if needed, but simple toggle is enough
-    }
-
     // Event Listeners
     button.addEventListener('click', toggleChat);
-    btnClose.addEventListener('click', toggleChat); // Close hides chat
+    btnClose.addEventListener('click', toggleChat);
 
-    btnMinimize.addEventListener('click', () => {
-        toggleChat(); // Minimize effectively just hides it
+    btnRefresh.addEventListener('click', () => {
+        // Clear chat UI and restart session
+        if (confirm("Are you sure you want to restart this conversation?")) {
+            localStorage.removeItem('chat_visitor_id');
+            localStorage.removeItem('chat_session_id');
+            // Clear auto-show flag so it can trigger again on next page load
+            sessionStorage.removeItem('chat_auto_shown');
+            messagesDiv.innerHTML = '';
+            visitorId = 'visitor-' + Math.random().toString(36).substr(2, 9);
+            localStorage.setItem('chat_visitor_id', visitorId);
+            addMessage("Conversation restarted. How can I help you?", 'bot');
+            // Re-build suggested messages after reset
+            buildSuggestedMessages();
+        }
     });
 
-    btnMaximize.addEventListener('click', toggleMaximize);
-
     // Agent Request
-    agentBtn.addEventListener('click', async () => {
-        const sessionId = localStorage.getItem('chat_session_id');
-        if (!sessionId) {
-            alert("Please say hello first!");
-            return;
-        }
+    if (agentBtn) {
+        agentBtn.addEventListener('click', async () => {
+            const sessionId = localStorage.getItem('chat_session_id');
+            if (!sessionId) {
+                alert("Please say hello first!");
+                return;
+            }
 
-        agentBtn.innerText = "Requesting...";
-        agentBtn.disabled = true;
+            agentBtn.innerText = "Requesting...";
+            agentBtn.disabled = true;
 
-        try {
-            const response = await fetch('http://127.0.0.1:3001/chats/request-agent', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ sessionId: sessionId })
-            });
+            try {
+                const response = await fetch('http://127.0.0.1:3001/chats/request-agent', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sessionId: sessionId })
+                });
 
-            const data = await response.json();
-            if (response.ok && data.status === 'success') {
-                updateStatus('waiting');
-                addMessage("System: An agent has been notified. Please wait.", "bot");
-                startStatusPolling(sessionId);
-                agentBtn.style.display = 'none';
-            } else {
-                alert("Failed to request agent: " + data.message);
+                const data = await response.json();
+                if (response.ok && data.status === 'success') {
+                    updateStatus('waiting');
+                    addMessage("System: An agent has been notified. Please wait.", "bot");
+                    startStatusPolling(sessionId);
+                    agentBtn.style.display = 'none';
+                } else {
+                    alert("Failed to request agent: " + data.message);
+                    agentBtn.disabled = false;
+                    agentBtn.innerText = "Speak to Human Agent";
+                }
+            } catch (e) {
+                console.error(e);
                 agentBtn.disabled = false;
                 agentBtn.innerText = "Speak to Human Agent";
             }
-        } catch (e) {
-            console.error(e);
-            agentBtn.disabled = false;
-            agentBtn.innerText = "Speak to Human Agent";
-        }
-    });
+        });
+    }
 
     // Helper: Add Message
     function addMessage(text, sender) {
@@ -480,7 +850,9 @@
         if (sender === 'bot') {
             const avatar = document.createElement('div');
             avatar.className = 'sb-avatar-small';
-            avatar.innerText = '🤖';
+            avatar.innerHTML = widgetSettings.botAvatarType === 'image' && widgetSettings.botAvatar.startsWith('http')
+                ? `<img src="${widgetSettings.botAvatar}" alt="Avatar" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;" />`
+                : widgetSettings.botAvatar;
             group.appendChild(avatar);
         }
 
@@ -492,6 +864,35 @@
 
         messagesDiv.appendChild(group);
         scrollToBottom();
+    }
+
+    // Helper: Typing Indicator
+    function showTypingIndicator() {
+        const group = document.createElement('div');
+        group.className = 'sb-message-group bot sb-anim-pop sb-typing-indicator-group';
+
+        const avatar = document.createElement('div');
+        avatar.className = 'sb-avatar-small';
+        avatar.innerHTML = widgetSettings.botAvatarType === 'image' && widgetSettings.botAvatar.startsWith('http')
+            ? `<img src="${widgetSettings.botAvatar}" alt="Avatar" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;" />`
+            : widgetSettings.botAvatar;
+        group.appendChild(avatar);
+
+        const bubble = document.createElement('div');
+        bubble.className = 'sb-bubble';
+        bubble.style.display = 'flex';
+        bubble.style.alignItems = 'center';
+        bubble.style.padding = '12px 16px';
+        bubble.innerHTML = '<div class="sb-typing"><div class="sb-dot"></div><div class="sb-dot"></div><div class="sb-dot"></div></div>';
+        group.appendChild(bubble);
+
+        messagesDiv.appendChild(group);
+        scrollToBottom();
+    }
+
+    function removeTypingIndicator() {
+        const indicators = messagesDiv.querySelectorAll('.sb-typing-indicator-group');
+        indicators.forEach(ind => ind.remove());
     }
 
     function scrollToBottom() {
@@ -517,7 +918,7 @@
                     }
                 }
             }
-        } catch (e) { }
+        } catch { }
     }
     setInterval(pollMessages, 3000);
 
@@ -528,6 +929,8 @@
 
         addMessage(text, 'user');
         input.value = '';
+
+        showTypingIndicator();
 
         try {
             const response = await fetch('http://127.0.0.1:3001/messages', {
@@ -540,14 +943,18 @@
                 })
             });
             const data = await response.json();
+
+            removeTypingIndicator();
+
             if (data.data && data.data.sessionId) {
                 localStorage.setItem('chat_session_id', data.data.sessionId);
             }
             if (data.data && data.data.reply) {
-                setTimeout(() => addMessage(data.data.reply, 'bot'), 500);
+                addMessage(data.data.reply, 'bot');
             }
-        } catch (e) {
-            addMessage("Error: " + e.message, 'bot');
+        } catch {
+            removeTypingIndicator();
+            addMessage("Error: Failed to connect to server.", 'bot');
         }
     }
 
@@ -592,12 +999,30 @@
                         if (agentBtn) agentBtn.style.display = 'block';
                     }
                 }
-            } catch (e) { }
+            } catch { }
         }, 5000);
     }
 
     // Initialize
     const savedSession = localStorage.getItem('chat_session_id');
     if (savedSession) startStatusPolling(savedSession);
+
+    // Auto Show Logic: automatically open widget after N seconds if configured
+    if (widgetSettings.autoShowDelay > 0) {
+        const hasAutoShown = sessionStorage.getItem('chat_auto_shown');
+        if (!hasAutoShown) {
+            setTimeout(() => {
+                if (!isOpen) {
+                    toggleChat();
+                    sessionStorage.setItem('chat_auto_shown', 'true');
+                }
+            }, widgetSettings.autoShowDelay * 1000);
+        }
+    }
+
+    // Prevent repeat auto-show after user interacts
+    windowDiv.addEventListener('click', () => {
+        sessionStorage.setItem('chat_auto_shown', 'true');
+    });
 
 })();

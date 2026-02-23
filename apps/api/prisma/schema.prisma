@@ -16,10 +16,27 @@ model Tenant {
   updatedAt       DateTime         @updatedAt
   systemPrompt    String?
   chatConfig      Json?
+  widgetConfig    Json?
   chatSessions    ChatSession[]
   endUsers        EndUser[]
   knowledgeChunks KnowledgeChunk[]
   User            User[]
+  integrations    Integration[]
+  leads           Lead[]
+}
+
+model Integration {
+  id          String   @id @default(uuid())
+  tenantId    String
+  provider    String   // "messenger", "whatsapp"
+  pageId      String?  // Facebook Page ID or WhatsApp Phone Number ID
+  accessToken String?  // Long-lived Page Access Token
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  
+  @@unique([tenantId, provider, pageId])
 }
 
 model EndUser {
@@ -47,6 +64,7 @@ model ChatSession {
   messages     ChatMessage[]
   endUser      EndUser?      @relation(fields: [endUserId], references: [id])
   tenant       Tenant        @relation(fields: [tenantId], references: [id])
+  leads        Lead[]
 }
 
 model ChatMessage {
@@ -83,3 +101,23 @@ model User {
   updatedAt DateTime @updatedAt
   Tenant    Tenant   @relation(fields: [tenantId], references: [id])
 }
+
+model Lead {
+  id             String      @id @default(uuid())
+  tenantId       String
+  sessionId      String?     
+  name           String?
+  email          String?
+  phone          String?
+  company        String?
+  customData     Json?
+  source         String      @default("widget")
+  createdAt      DateTime    @default(now())
+  
+  tenant         Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  session        ChatSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([email])
+}
+

@@ -9,9 +9,7 @@ const pinecone = new Pinecone({
     apiKey: PINECONE_KEY
 });
 
-// Get provider from env (default: ollama)
-const AI_PROVIDER = (process.env.AI_PROVIDER || 'ollama') as AIProvider;
-const embeddings = getEmbeddings(AI_PROVIDER);
+const embeddings = getEmbeddings();
 
 export class KnowledgeService {
     private indexName = "chatbot-saas"; // Ensure this index exists in Pinecone
