@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useAuth } from '../../../context/AuthContext';
 import { Copy, Check, ExternalLink, Settings, Code, Zap } from 'lucide-react';
 import Link from 'next/link';
+import { useSearchParams, useRouter } from 'next/navigation';
 
 export default function IntegrationPage() {
     const { user, isLoading } = useAuth();
@@ -65,7 +66,9 @@ export default function IntegrationPage() {
 
                     {/* Facebook Messenger Card */}
                     <div className="flex flex-col gap-1">
-                        <FacebookIntegration tenantId={user.tenantId} />
+                        <Suspense fallback={<div className="animate-pulse h-64 bg-slate-50 rounded-2xl border border-slate-100"></div>}>
+                            <FacebookIntegration tenantId={user.tenantId} />
+                        </Suspense>
                     </div>
 
                     {/* Installation Code Card */}
@@ -194,11 +197,15 @@ export default function IntegrationPage() {
 }
 
 function FacebookIntegration({ tenantId }: { tenantId: string }) {
-    const [pageId, setPageId] = useState('');
-    const [accessToken, setAccessToken] = useState('');
+    const searchParams = useSearchParams();
+    const router = useRouter();
+    const [fbToken, setFbToken] = useState<string>(searchParams?.get('fb_token') || '');
+    const [pages, setPages] = useState<any[]>([]);
+    const [selectedPage, setSelectedPage] = useState<any>(null);
+
     const [loading, setLoading] = useState(false);
     const [connected, setConnected] = useState(false);
-    const [pageName, setPageName] = useState(''); // Store connected page ID for display
+    const [pageName, setPageName] = useState(''); // Store connected page ID/name for display
 
     const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
@@ -222,20 +229,47 @@ function FacebookIntegration({ tenantId }: { tenantId: string }) {
         checkStatus();
     }, [tenantId, API_URL]);
 
-    const handleConnect = async () => {
-        if (!pageId || !accessToken) return alert('Please fill in all fields');
+    // Fetch pages if fbToken is present
+    useEffect(() => {
+        if (fbToken && !connected) {
+            const fetchPages = async () => {
+                setLoading(true);
+                try {
+                    const axios = (await import('axios')).default;
+                    const res = await axios.get(`${API_URL}/integrations/messenger/pages?token=${fbToken}`);
+                    if (res.data.data && res.data.data.length > 0) {
+                        setPages(res.data.data);
+                        setSelectedPage(res.data.data[0]);
+                    }
+                } catch (e) {
+                    console.error("Failed to fetch pages", e);
+                    alert("Failed to load Facebook Pages. The token might be invalid or expired.");
+                } finally {
+                    setLoading(false);
+                }
+            }
+            fetchPages();
+        }
+    }, [fbToken, connected, API_URL]);
+
+    const handleLoginClick = () => {
+        window.location.href = `${API_URL}/integrations/messenger/auth?tenantId=${tenantId}`;
+    };
+
+    const handleSubscribe = async () => {
+        if (!selectedPage) return;
         setLoading(true);
         try {
             const axios = (await import('axios')).default;
-            await axios.post(`${API_URL}/integrations/messenger`, {
+            await axios.post(`${API_URL}/integrations/messenger/subscribe`, {
                 tenantId,
-                pageId,
-                accessToken
+                pageId: selectedPage.id,
+                pageAccessToken: selectedPage.access_token
             });
             setConnected(true);
-            setPageName(pageId);
-            setPageId('');
-            setAccessToken('');
+            setPageName(selectedPage.name || selectedPage.id);
+            setFbToken('');
+            router.replace('/dashboard/integration'); // Clean URL
             alert('Connected successfully!');
         } catch (err: unknown) {
             const axiosErr = err as { response?: { data?: { message?: string } } };
@@ -254,6 +288,7 @@ function FacebookIntegration({ tenantId }: { tenantId: string }) {
             await axios.post(`${API_URL}/integrations/messenger/disconnect`, { tenantId });
             setConnected(false);
             setPageName('');
+            setFbToken('');
         } catch (err: unknown) {
             console.error(err);
             alert('Failed to disconnect');
@@ -273,7 +308,7 @@ function FacebookIntegration({ tenantId }: { tenantId: string }) {
                     </div>
                     <div>
                         <h2 className="text-base font-bold text-slate-900">Facebook Messenger</h2>
-                        <p className="text-[11px] text-slate-500 font-medium">Official Integration</p>
+                        <p className="text-[11px] text-slate-500 font-medium">1-Click Enterprise Integration</p>
                     </div>
                 </div>
                 {connected && (
@@ -288,46 +323,52 @@ function FacebookIntegration({ tenantId }: { tenantId: string }) {
                 {!connected ? (
                     <div className="space-y-5">
                         <p className="text-sm text-slate-600 leading-relaxed">
-                            Connect your Facebook Page to route messages directly into this dashboard. Reply to customers seamlessly alongside your AI rules.
+                            Connect your Facebook Page to route messages directly into this dashboard.
+                            Uses securely authenticated graph API connection.
                         </p>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div className="space-y-1.5">
-                                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wide">Page ID</label>
-                                <input
-                                    type="text"
-                                    value={pageId}
-                                    onChange={e => setPageId(e.target.value)}
-                                    className="w-full text-sm border border-slate-300 rounded-xl px-4 py-2.5 outline-none transition-all focus:ring-2 focus:ring-[#1877F2]/20 focus:border-[#1877F2] bg-slate-50 hover:bg-white focus:bg-white"
-                                    placeholder="e.g. 1000636..."
-                                />
+                        {!fbToken ? (
+                            <div className="pt-2">
+                                <button
+                                    onClick={handleLoginClick}
+                                    className="w-full py-3 bg-[#1877F2] hover:bg-[#166FE5] active:bg-[#1464CD] text-white text-sm font-bold rounded-xl transition-all shadow-sm flex items-center justify-center gap-2"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2C6.477 2 2 6.145 2 11.258c0 2.898 1.458 5.485 3.75 7.182V22l3.41-1.884c.895.248 1.85.384 2.84.384 5.523 0 10-4.145 10-9.258C22 6.145 17.523 2 12 2zm1.18 11.39-3.05-3.26-5.96 3.26 6.54-6.94 3.16 3.26 5.86-3.26-6.55 6.94z"></path></svg>
+                                    Connect with Facebook
+                                </button>
                             </div>
-
-                            <div className="space-y-1.5 md:col-span-2">
-                                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wide flex justify-between">
-                                    <span>Access Token</span>
-                                    <a href="#" className="text-[#1877F2] hover:underline normal-case font-medium">How to get this?</a>
-                                </label>
-                                <input
-                                    type="password"
-                                    value={accessToken}
-                                    onChange={e => setAccessToken(e.target.value)}
-                                    className="w-full text-sm border border-slate-300 rounded-xl px-4 py-2.5 outline-none transition-all focus:ring-2 focus:ring-[#1877F2]/20 focus:border-[#1877F2] bg-slate-50 hover:bg-white focus:bg-white font-mono"
-                                    placeholder="EAAGm0PX4ZC... Long-lived Page Token"
-                                />
+                        ) : (
+                            <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 space-y-4">
+                                <h3 className="text-sm font-bold text-slate-800">Select a Page to Connect</h3>
+                                {loading && pages.length === 0 ? (
+                                    <div className="animate-pulse h-10 bg-slate-200 rounded-lg w-full"></div>
+                                ) : (
+                                    <>
+                                        <select
+                                            className="w-full text-sm border border-slate-300 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-[#1877F2]/20"
+                                            value={selectedPage?.id || ''}
+                                            onChange={(e) => {
+                                                const p = pages.find(p => p.id === e.target.value);
+                                                setSelectedPage(p);
+                                            }}
+                                        >
+                                            {pages.map(p => (
+                                                <option key={p.id} value={p.id}>{p.name} ({p.id})</option>
+                                            ))}
+                                            {pages.length === 0 && <option disabled value="">No pages found</option>}
+                                        </select>
+                                        <button
+                                            onClick={handleSubscribe}
+                                            disabled={loading || pages.length === 0}
+                                            className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white text-sm font-bold rounded-xl transition-all shadow-sm disabled:opacity-50 flex items-center justify-center gap-2"
+                                        >
+                                            {loading && <div className="animate-spin rounded-full h-4 w-4 border-2 border-white/20 border-t-transparent"></div>}
+                                            {loading ? 'Subscribing...' : 'Link Selected Page'}
+                                        </button>
+                                    </>
+                                )}
                             </div>
-                        </div>
-
-                        <div className="pt-2">
-                            <button
-                                onClick={handleConnect}
-                                disabled={loading}
-                                className="w-full py-3 bg-[#1877F2] hover:bg-[#166FE5] active:bg-[#1464CD] text-white text-sm font-bold rounded-xl transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                            >
-                                {loading && <div className="animate-spin rounded-full h-4 w-4 border-2 border-white/20 border-t-white"></div>}
-                                {loading ? 'Securing Connection...' : 'Connect Facebook Page'}
-                            </button>
-                        </div>
+                        )}
                     </div>
                 ) : (
                     <div>
@@ -338,7 +379,7 @@ function FacebookIntegration({ tenantId }: { tenantId: string }) {
                             <div>
                                 <h3 className="text-sm font-bold text-slate-900 mb-1">Successfully Linked</h3>
                                 <p className="text-xs text-slate-600">
-                                    Receiving messages from Page ID: <code className="font-mono bg-white px-2 py-0.5 rounded border border-slate-200 text-slate-800">{pageName}</code>
+                                    Receiving messages from: <code className="font-mono bg-white px-2 py-0.5 rounded border border-slate-200 text-slate-800">{pageName}</code>
                                 </p>
                             </div>
                         </div>
