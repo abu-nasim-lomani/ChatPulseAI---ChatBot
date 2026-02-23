@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, MessageSquare, Book, BarChart2, Settings, Puzzle, LogOut } from 'lucide-react';
+import { LayoutDashboard, MessageSquare, Book, BarChart2, Settings, Puzzle, LogOut, Users } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -13,6 +13,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     const navItems = [
         { name: 'Overview', href: '/dashboard', icon: LayoutDashboard },
         { name: 'Conversations', href: '/dashboard/chat', icon: MessageSquare, badge: 12 },
+        { name: 'Leads', href: '/dashboard/leads', icon: Users },
         { name: 'Knowledge Base', href: '/dashboard/knowledge', icon: Book },
         { name: 'Analytics', href: '/dashboard/analytics', icon: BarChart2 },
         { name: 'Integrations', href: '/dashboard/integration', icon: Puzzle },

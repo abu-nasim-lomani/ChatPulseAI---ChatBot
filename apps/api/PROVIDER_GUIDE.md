@@ -1,84 +1,59 @@
-# AI Provider Switching Guide
+# AI Provider Architecture Guide
 
-Your chatbot now supports **3 AI providers** that can be switched instantly!
+Your chatbot SaaS uses a **Hybrid (Decoupled) Architecture** for maximum efficiency and stability.
 
-## Quick Switch
+## How It Works
+
+### 1. Embeddings (Fixed)
+The embedding system (which converts text into searchable database vectors) is **permanently fixed to OpenAI's `text-embedding-3-small`**. 
+- **Reason:** Ensuring all Pinecone vectors are exactly 1536 dimensions. This prevents database corruption when users switch chat bots and avoids the need to re-upload documents.
+- **Requirement:** A valid `OPENAI_API_KEY` must always be present in your `.env` file.
+
+### 2. Chat Generation (Dynamic)
+The generation system (which actually talks to the user) is **dynamic per Tenant**.
+- **Reason:** Allows tenants to "Bring Your Own Key" (BYOK) and choose their preferred model (GPT, Gemini, Llama) through the Dashboard without affecting the main database.
+- **Default:** Controlled by `AI_PROVIDER` in `.env`.
+- **Tenant Override:** Can be overridden via the `chatConfig` JSON in the PostgreSQL `Tenant` table.
+
+---
+
+## Modifying the Default Chat Provider
 
 Edit `apps/api/.env`:
 
 ```env
-# Choose one:
-AI_PROVIDER=ollama   # ✅ Currently Active (FREE, Local)
-# AI_PROVIDER=openai  # Paid, High Quality
-# AI_PROVIDER=gemini  # FREE, Google Cloud
+# Default Chat Provider (fallback if tenant has no config)
+AI_PROVIDER=ollama
+
+# REQUIRED for Embeddings (Global)
+OPENAI_API_KEY="sk-..."
 ```
 
-Then restart the API server.
-
 ---
 
-## Provider Details
+## Tenant Configuration (Dashboard API)
 
-### 1. Ollama (Current) 🆓
-- **Cost:** FREE
-- **Models:** llama3.2 (chat), nomic-embed-text (embeddings)
-- **Vector Dimensions:** 768
-- **Requirements:** 
-  - Ollama installed locally
-  - Models pulled: `ollama pull llama3.2` & `ollama pull nomic-embed-text`
-- **Pros:** No API costs, fully offline, no rate limits
-- **Cons:** Requires local resources (8GB+ RAM recommended)
+The `ChatService` automatically reads the `Tenant.chatConfig` field from the database.
+If a tenant provides their own API key and model choice, it bypasses the `.env` settings for chat generation!
 
-### 2. OpenAI 💰
-- **Cost:** Paid (requires billing setup)
-- **Models:** gpt-4o-mini (chat), text-embedding-3-small (embeddings)
-- **Vector Dimensions:** 1536
-- **Requirements:** 
-  - Valid `OPENAI_API_KEY` with billing
-  - **Pinecone index MUST be 1536d** (recreate if switching)
-- **Pros:** High quality, fast, reliable
-- **Cons:** Costs money, rate limits on free tier
+Example `chatConfig` JSON format:
+```json
+{
+  "activeProvider": "openai",
+  "providers": {
+    "openai": {
+      "model": "gpt-4o",
+      "apiKey": "sk-tenant-personal-key"
+    },
+    "gemini": {
+      "model": "gemini-1.5-pro",
+      "apiKey": "AIzaSy..."
+    }
+  }
+}
+```
 
-### 3. Google Gemini 🆓
-- **Cost:** FREE
-- **Models:** gemini-1.5-flash (chat), gemini-embedding-001 (embeddings)
-- **Vector Dimensions:** 3072
-- **Requirements:** 
-  - Valid `GOOGLE_API_KEY`
-  - **Pinecone index MUST be 3072d** (recreate if switching)
-- **Pros:** Free, good quality
-- **Cons:** API availability may vary
-
----
-
-## Switching Steps
-
-### From Ollama → OpenAI:
-1. Edit `.env`: `AI_PROVIDER=openai`
-2. Ensure `OPENAI_API_KEY` is valid and has billing
-3. **Recreate Pinecone index** (768d → 1536d):
-   ```bash
-   cd apps/api
-   npx tsx create_pinecone_index.ts
-   ```
-4. Restart server: `npm run dev`
-
-### From Ollama → Gemini:
-1. Edit `.env`: `AI_PROVIDER=gemini`
-2. **Recreate Pinecone index** (768d → 3072d):
-   ```bash
-   cd apps/api
-   npx tsx create_pinecone_index.ts
-   ```
-3. Restart server: `npm run dev`
-
----
-
-## Note on Pinecone Index Dimensions
-
-⚠️ **CRITICAL:** Each provider has different vector dimensions. When switching:
-- The dimensions in `create_pinecone_index.ts` will **auto-adjust** based on `AI_PROVIDER`
-- You MUST recreate the index when switching providers
-- Old vectors will be deleted
-
-The system is smart - it reads `AI_PROVIDER` and sets the correct dimensions automatically!
+## Pinecone Configuration
+- You no longer need to worry about changing index dimensions.
+- The dimension is hardcoded to **1536** to match OpenAI.
+- Use `npm run create-index` to set it up initially.

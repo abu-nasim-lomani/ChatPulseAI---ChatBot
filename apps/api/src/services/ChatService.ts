@@ -5,9 +5,6 @@ import { knowledgeService } from './KnowledgeService';
 import { getChatModel, AIProvider } from '../lib/ai-config';
 import { HumanMessage, SystemMessage, AIMessage } from "@langchain/core/messages";
 
-// Get provider from env (default: ollama)
-const AI_PROVIDER = (process.env.AI_PROVIDER || 'ollama') as AIProvider;
-const chatModel = getChatModel(AI_PROVIDER);
 
 export class ChatService {
     static async processMessage(apiKey: string, text: string, senderId: string = 'visitor') {
@@ -151,8 +148,19 @@ export class ChatService {
                 })
                 .filter((m): m is HumanMessage | AIMessage => m !== null);
 
-            // E. Call AI with full conversation history
-            const response = await chatModel.invoke([
+            // E. Instantiate Dynamic AI Model for this Tenant
+            const chatConfig = tenant.chatConfig as any;
+            const activeProvider = chatConfig?.activeProvider || process.env.AI_PROVIDER || 'ollama';
+            const providerConfig = chatConfig?.providers?.[activeProvider] || {};
+
+            const dynamicChatModel = getChatModel({
+                provider: activeProvider as AIProvider,
+                model: providerConfig.model,
+                apiKey: providerConfig.apiKey
+            });
+
+            // F. Call AI with full conversation history
+            const response = await dynamicChatModel.invoke([
                 new SystemMessage(systemPrompt),
                 ...historyMessages
             ]);

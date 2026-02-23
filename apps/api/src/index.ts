@@ -9,6 +9,8 @@ import knowledgeRoutes from './routes/knowledge';
 import tenantsRoutes from './routes/tenants';
 import messengerRoutes from './routes/messenger'; // Import messengerRoutes
 import integrationRoutes from './routes/integrations'; // Import integrationRoutes
+import widgetRoutes from './routes/widget'; // Public widget API
+import uploadRoutes from './routes/upload'; // Avatar Image Upload
 
 // Load .env from the correct path
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
@@ -32,6 +34,9 @@ import authRoutes from './routes/auth';
 
 // ... (existing imports)
 
+// Static Files
+app.use('/public', express.static(path.join(__dirname, '../public')));
+
 // Routes
 app.use('/auth', authRoutes);       // Authentication API
 app.use('/health', healthRoutes);
@@ -41,6 +46,8 @@ app.use('/knowledge', knowledgeRoutes); // Knowledge Base API
 app.use('/tenants', tenantsRoutes);     // Tenant Settings API
 app.use('/webhooks/messenger', messengerRoutes); // Messenger Webhook
 app.use('/integrations', integrationRoutes); // Integration API
+app.use('/widget', widgetRoutes); // Public Widget Settings
+app.use('/upload', uploadRoutes); // Unified uploads
 
 app.get('/', (req: Request, res: Response) => {
     res.send('SaaS Chatbot API is running!');

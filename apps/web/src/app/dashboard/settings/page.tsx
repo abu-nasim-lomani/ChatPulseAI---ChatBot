@@ -86,6 +86,15 @@ export default function BotSettingsPage() {
     const [memoryType, setMemoryType] = useState<'count' | 'time'>('count');
     const [memoryValue, setMemoryValue] = useState<number>(10);
     const [temperature, setTemperature] = useState<number>(0.7);
+
+    // AI Provider (BYOK) Config
+    const [activeProvider, setActiveProvider] = useState<'ollama' | 'openai' | 'gemini'>('ollama');
+    const [providers, setProviders] = useState({
+        ollama: { model: 'llama3.2', apiKey: '' },
+        openai: { model: 'gpt-4o-mini', apiKey: '' },
+        gemini: { model: 'gemini-1.5-flash', apiKey: '' }
+    });
+
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
     const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
@@ -103,6 +112,12 @@ export default function BotSettingsPage() {
                 setMemoryType(res.data.chatConfig.memoryType || 'count');
                 setMemoryValue(res.data.chatConfig.memoryValue || 10);
                 setTemperature(res.data.chatConfig.temperature ?? 0.7);
+                if (res.data.chatConfig.activeProvider) {
+                    setActiveProvider(res.data.chatConfig.activeProvider);
+                }
+                if (res.data.chatConfig.providers) {
+                    setProviders(prev => ({ ...prev, ...res.data.chatConfig.providers }));
+                }
             }
         } catch (error) {
             console.error('Failed to fetch settings:', error);
@@ -130,7 +145,7 @@ export default function BotSettingsPage() {
         try {
             await axios.patch(`${apiUrl}/tenants/settings`, {
                 tenantId, systemPrompt,
-                chatConfig: { memoryType, memoryValue, temperature }
+                chatConfig: { memoryType, memoryValue, temperature, activeProvider, providers }
             });
             setMessage({ text: 'Bot settings updated successfully!', type: 'success' });
         } catch (error) {
@@ -211,6 +226,70 @@ export default function BotSettingsPage() {
 
                 {/* LEFT: Main Settings */}
                 <div className="flex-1 overflow-y-auto p-6 space-y-5">
+
+                    {/* AI Provider Configuration (BYOK) */}
+                    <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+                        <div className="px-5 py-3.5 border-b border-gray-100 bg-gray-50/50 flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                                <Bot size={15} className="text-indigo-600" />
+                                <div>
+                                    <h2 className="text-sm font-bold text-gray-800">AI Chat Provider (BYOK)</h2>
+                                    <p className="text-[10px] text-gray-500">Enable custom AI models with your personal API Key.</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="p-5 space-y-4">
+                            <div>
+                                <label className="text-xs font-semibold text-gray-600 mb-2 block">Active Provider</label>
+                                <select
+                                    value={activeProvider}
+                                    onChange={(e) => setActiveProvider(e.target.value as 'ollama' | 'openai' | 'gemini')}
+                                    className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition bg-white"
+                                >
+                                    <option value="ollama">Ollama (Default / Free)</option>
+                                    <option value="openai">OpenAI (Recommended)</option>
+                                    <option value="gemini">Google Gemini</option>
+                                </select>
+                            </div>
+
+                            {activeProvider !== 'ollama' && (
+                                <div className="space-y-4 p-4 bg-gray-50 rounded-xl border border-gray-100">
+                                    <div>
+                                        <label className="text-xs font-semibold text-gray-600 mb-2 block">Model Name</label>
+                                        <input
+                                            type="text"
+                                            value={providers[activeProvider as keyof typeof providers]?.model || ''}
+                                            onChange={(e) => setProviders(prev => ({
+                                                ...prev,
+                                                [activeProvider]: { ...prev[activeProvider as keyof typeof prev], model: e.target.value }
+                                            }))}
+                                            placeholder={activeProvider === 'openai' ? 'gpt-4o-mini' : 'gemini-1.5-flash'}
+                                            className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-semibold text-gray-600 mb-2 block">API Key</label>
+                                        <input
+                                            type="password"
+                                            value={providers[activeProvider as keyof typeof providers]?.apiKey || ''}
+                                            onChange={(e) => setProviders(prev => ({
+                                                ...prev,
+                                                [activeProvider]: { ...prev[activeProvider as keyof typeof prev], apiKey: e.target.value }
+                                            }))}
+                                            placeholder={activeProvider === 'openai' ? 'sk-...' : 'AIzaSy...'}
+                                            className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition"
+                                        />
+                                    </div>
+                                    <div className="flex items-start gap-3 bg-blue-50 rounded-xl p-3.5 border border-blue-100">
+                                        <Info size={14} className="text-blue-500 flex-shrink-0 mt-0.5" />
+                                        <p className="text-[11px] text-blue-700">
+                                            Knowledge Base documents will still be read securely using the platform&apos;s default Embedding system, ensuring your chat history is never corrupted when switching models!
+                                        </p>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
 
                     {/* System Prompt */}
                     <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
