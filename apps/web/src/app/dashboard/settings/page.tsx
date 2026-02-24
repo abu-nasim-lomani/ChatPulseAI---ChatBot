@@ -5,7 +5,7 @@ import { useAuth } from '../../../context/AuthContext';
 import {
     Settings, Bot, Brain, Thermometer, Zap, Lightbulb,
     Save, RotateCcw, CheckCircle, AlertCircle, X,
-    MessageSquare, Clock, Target, Palette, Loader2, Info
+    MessageSquare, Clock, Target, Palette, Loader2, Info, ShieldAlert, Plus, Trash2, Pencil
 } from 'lucide-react';
 
 const PRESETS = [
@@ -83,6 +83,8 @@ Language Rules:
 export default function BotSettingsPage() {
     const { user, isLoading: authLoading } = useAuth();
     const [systemPrompt, setSystemPrompt] = useState('');
+    const [welcomeMessage, setWelcomeMessage] = useState('Hello! 👋 How can I help you today?');
+    const [fallbackMessage, setFallbackMessage] = useState("I'm sorry, I don't have information on that. Would you like to speak with a human agent?");
     const [memoryType, setMemoryType] = useState<'count' | 'time'>('count');
     const [memoryValue, setMemoryValue] = useState<number>(10);
     const [temperature, setTemperature] = useState<number>(0.7);
@@ -102,6 +104,15 @@ export default function BotSettingsPage() {
     const tenantId = user?.tenantId;
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3001';
 
+    // Canned Responses state
+    const [cannedResponses, setCannedResponses] = useState<{ id: string; shortcut: string; title: string; content: string }[]>([]);
+    const [newShortcut, setNewShortcut] = useState('');
+    const [newTitle, setNewTitle] = useState('');
+    const [newContent, setNewContent] = useState('');
+    const [isAddingCanned, setIsAddingCanned] = useState(false);
+    const [editingCanned, setEditingCanned] = useState<string | null>(null);
+    const [editFields, setEditFields] = useState<{ shortcut: string; title: string; content: string }>({ shortcut: '', title: '', content: '' });
+
     const fetchSettings = async () => {
         if (!tenantId) return;
         setIsLoading(true);
@@ -112,6 +123,8 @@ export default function BotSettingsPage() {
                 setMemoryType(res.data.chatConfig.memoryType || 'count');
                 setMemoryValue(res.data.chatConfig.memoryValue || 10);
                 setTemperature(res.data.chatConfig.temperature ?? 0.7);
+                if (res.data.chatConfig.welcomeMessage !== undefined) setWelcomeMessage(res.data.chatConfig.welcomeMessage);
+                if (res.data.chatConfig.fallbackMessage !== undefined) setFallbackMessage(res.data.chatConfig.fallbackMessage);
                 if (res.data.chatConfig.activeProvider) {
                     setActiveProvider(res.data.chatConfig.activeProvider);
                 }
@@ -145,7 +158,7 @@ export default function BotSettingsPage() {
         try {
             await axios.patch(`${apiUrl}/tenants/settings`, {
                 tenantId, systemPrompt,
-                chatConfig: { memoryType, memoryValue, temperature, activeProvider, providers }
+                chatConfig: { memoryType, memoryValue, temperature, activeProvider, providers, welcomeMessage, fallbackMessage }
             });
             setMessage({ text: 'Bot settings updated successfully!', type: 'success' });
         } catch (error) {
@@ -161,6 +174,62 @@ export default function BotSettingsPage() {
             setMessage({ text: errorMsg, type: 'error' });
         } finally {
             setIsSaving(false);
+        }
+    };
+
+    // Canned Responses handlers
+    const fetchCannedResponses = async () => {
+        if (!tenantId) return;
+        try {
+            const res = await axios.get(`${apiUrl}/canned-responses/${tenantId}`);
+            setCannedResponses(res.data.data || []);
+        } catch { /* silent */ }
+    };
+
+    useEffect(() => {
+        if (!authLoading && tenantId) fetchCannedResponses();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [authLoading, tenantId]);
+
+    const handleAddCanned = async () => {
+        if (!newShortcut.trim() || !newContent.trim() || !tenantId) return;
+        setIsAddingCanned(true);
+        try {
+            await axios.post(`${apiUrl}/canned-responses`, {
+                tenantId,
+                shortcut: newShortcut.toLowerCase().replace(/[^a-z0-9_]/g, ''),
+                title: newTitle || newShortcut,
+                content: newContent,
+            });
+            setNewShortcut(''); setNewTitle(''); setNewContent('');
+            await fetchCannedResponses();
+        } catch (err: unknown) {
+            const msg = axios.isAxiosError(err) ? err.response?.data?.error : null;
+            alert(msg || 'Failed to add canned response');
+        } finally { setIsAddingCanned(false); }
+    };
+
+    const handleDeleteCanned = async (id: string) => {
+        if (!confirm('Delete this canned response?')) return;
+        try {
+            await axios.delete(`${apiUrl}/canned-responses/${id}`);
+            setCannedResponses(prev => prev.filter(r => r.id !== id));
+        } catch { alert('Failed to delete'); }
+    };
+
+    const handleUpdateCanned = async (id: string) => {
+        if (!editFields.shortcut.trim() || !editFields.content.trim()) return;
+        try {
+            const res = await axios.put(`${apiUrl}/canned-responses/${id}`, {
+                shortcut: editFields.shortcut.toLowerCase().replace(/[^a-z0-9_]/g, ''),
+                title: editFields.title || editFields.shortcut,
+                content: editFields.content,
+            });
+            setCannedResponses(prev => prev.map(r => r.id === id ? res.data.data : r));
+            setEditingCanned(null);
+        } catch (err: unknown) {
+            const msg = axios.isAxiosError(err) ? err.response?.data?.error : null;
+            alert(msg || 'Failed to update');
         }
     };
 
@@ -320,6 +389,51 @@ export default function BotSettingsPage() {
                         </div>
                     </div>
 
+                    {/* Welcome Message */}
+                    <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+                        <div className="px-5 py-3.5 border-b border-gray-100 bg-gray-50/50 flex items-center gap-2">
+                            <MessageSquare size={15} className="text-indigo-600" />
+                            <div>
+                                <h3 className="text-sm font-bold text-gray-800">Welcome Message</h3>
+                                <p className="text-[10px] text-gray-500">The first message the bot sends when a user opens the chat</p>
+                            </div>
+                        </div>
+                        <div className="p-5">
+                            <textarea
+                                className="w-full h-24 p-4 resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 border border-gray-200 rounded-xl font-mono text-xs leading-relaxed text-gray-800 bg-white placeholder-gray-400 transition"
+                                value={welcomeMessage}
+                                onChange={(e) => setWelcomeMessage(e.target.value)}
+                                placeholder="E.g. Hello! 👋 How can I help you today?"
+                                spellCheck={false}
+                            />
+                            <p className="text-[10px] text-gray-400 mt-2">💡 Keep it short, friendly, and welcoming. Emojis work great here!</p>
+                        </div>
+                    </div>
+
+                    {/* Fallback Message */}
+                    <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+                        <div className="px-5 py-3.5 border-b border-gray-100 bg-amber-50/60 flex items-center gap-2">
+                            <ShieldAlert size={15} className="text-amber-500" />
+                            <div>
+                                <h3 className="text-sm font-bold text-gray-800">Fallback Message</h3>
+                                <p className="text-[10px] text-gray-500">What the bot says when it cannot find an answer in the knowledge base</p>
+                            </div>
+                        </div>
+                        <div className="p-5">
+                            <textarea
+                                className="w-full h-24 p-4 resize-none focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-400 border border-gray-200 rounded-xl font-mono text-xs leading-relaxed text-gray-800 bg-white placeholder-gray-400 transition"
+                                value={fallbackMessage}
+                                onChange={(e) => setFallbackMessage(e.target.value)}
+                                placeholder="E.g. I don't have that information right now. Would you like to speak with a human agent?"
+                                spellCheck={false}
+                            />
+                            <div className="flex items-start gap-2 mt-3 bg-amber-50 rounded-xl p-3 border border-amber-100">
+                                <Info size={13} className="text-amber-500 flex-shrink-0 mt-0.5" />
+                                <p className="text-[11px] text-amber-700">This message is shown when the AI cannot find a relevant answer. Always include a way for the user to get further help (e.g., contact support).</p>
+                            </div>
+                        </div>
+                    </div>
+
                     {/* Memory Configuration */}
                     <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
                         <div className="px-5 py-3.5 border-b border-gray-100 bg-gray-50/50 flex items-center gap-2">
@@ -474,6 +588,141 @@ export default function BotSettingsPage() {
                             </div>
                         </div>
                     </div>
+
+                    {/* Canned Responses Manager */}
+                    <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+                        <div className="px-5 py-3.5 border-b border-gray-100 bg-gray-50/50 flex items-center gap-2">
+                            <Zap size={15} className="text-indigo-600" />
+                            <div>
+                                <h2 className="text-sm font-bold text-gray-800">Quick Reply Templates</h2>
+                                <p className="text-[10px] text-gray-500">Type <code className="bg-gray-100 px-1 rounded">/shortcut</code> in the chat reply box to use these templates.</p>
+                            </div>
+                        </div>
+
+                        <div className="p-5 space-y-4">
+                            {/* Existing list */}
+                            {cannedResponses.length > 0 ? (
+                                <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                                    {cannedResponses.map(r => (
+                                        <div key={r.id} className={`rounded-xl border transition-all ${editingCanned === r.id ? 'border-indigo-200 bg-indigo-50/30 p-3' : 'border-gray-100 bg-gray-50 p-3'
+                                            }`}>
+                                            {editingCanned === r.id ? (
+                                                /* ── EDIT MODE ── */
+                                                <div className="space-y-2">
+                                                    <div className="flex gap-2">
+                                                        <div className="relative w-28 flex-shrink-0">
+                                                            <span className="absolute left-2 top-2 text-gray-400 text-xs">/</span>
+                                                            <input
+                                                                value={editFields.shortcut}
+                                                                onChange={e => setEditFields(f => ({ ...f, shortcut: e.target.value }))}
+                                                                className="w-full pl-4 pr-2 py-1.5 border border-indigo-200 rounded-lg text-xs outline-none focus:ring-1 focus:ring-indigo-500 bg-white"
+                                                            />
+                                                        </div>
+                                                        <input
+                                                            value={editFields.title}
+                                                            onChange={e => setEditFields(f => ({ ...f, title: e.target.value }))}
+                                                            placeholder="Title"
+                                                            className="flex-1 px-2 py-1.5 border border-indigo-200 rounded-lg text-xs outline-none focus:ring-1 focus:ring-indigo-500 bg-white"
+                                                        />
+                                                    </div>
+                                                    <textarea
+                                                        value={editFields.content}
+                                                        onChange={e => setEditFields(f => ({ ...f, content: e.target.value }))}
+                                                        rows={2}
+                                                        className="w-full px-2 py-1.5 border border-indigo-200 rounded-lg text-xs outline-none focus:ring-1 focus:ring-indigo-500 bg-white resize-none"
+                                                    />
+                                                    <div className="flex gap-2">
+                                                        <button
+                                                            onClick={() => handleUpdateCanned(r.id)}
+                                                            className="flex items-center gap-1 px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-lg hover:bg-indigo-700 transition"
+                                                        >
+                                                            <Save size={11} /> Save
+                                                        </button>
+                                                        <button
+                                                            onClick={() => setEditingCanned(null)}
+                                                            className="flex items-center gap-1 px-3 py-1.5 bg-white text-gray-600 text-xs font-bold rounded-lg border border-gray-200 hover:bg-gray-50 transition"
+                                                        >
+                                                            <X size={11} /> Cancel
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                /* ── VIEW MODE ── */
+                                                <div className="flex items-start gap-2.5 group">
+                                                    <span className="font-mono text-[10px] bg-indigo-100 text-indigo-700 px-2 py-1 rounded font-bold flex-shrink-0 mt-0.5">/{r.shortcut}</span>
+                                                    <div className="flex-1 min-w-0">
+                                                        <p className="text-xs font-semibold text-gray-800">{r.title}</p>
+                                                        <p className="text-[10px] text-gray-500 mt-0.5 line-clamp-2">{r.content}</p>
+                                                    </div>
+                                                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition flex-shrink-0">
+                                                        <button
+                                                            onClick={() => { setEditingCanned(r.id); setEditFields({ shortcut: r.shortcut, title: r.title, content: r.content }); }}
+                                                            className="p-1 text-gray-300 hover:text-indigo-500 transition"
+                                                            title="Edit"
+                                                        >
+                                                            <Pencil size={12} />
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleDeleteCanned(r.id)}
+                                                            className="p-1 text-gray-300 hover:text-red-500 transition"
+                                                            title="Delete"
+                                                        >
+                                                            <Trash2 size={12} />
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <p className="text-xs text-gray-400 text-center py-4">No templates yet. Add your first one below.</p>
+                            )}
+
+                            {/* Add new form */}
+                            <div className="border border-dashed border-gray-200 rounded-xl p-4 space-y-3">
+                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Add New Template</p>
+                                <div className="flex gap-2">
+                                    <div className="relative flex-shrink-0 w-32">
+                                        <span className="absolute left-2.5 top-2.5 text-gray-400 text-xs">/</span>
+                                        <input
+                                            type="text"
+                                            placeholder="shortcut"
+                                            value={newShortcut}
+                                            onChange={e => setNewShortcut(e.target.value)}
+                                            className="w-full pl-5 pr-2 py-2 border border-gray-200 rounded-lg text-xs focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                                        />
+                                    </div>
+                                    <input
+                                        type="text"
+                                        placeholder="Title (optional)"
+                                        value={newTitle}
+                                        onChange={e => setNewTitle(e.target.value)}
+                                        className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-xs focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                                    />
+                                </div>
+                                <textarea
+                                    placeholder="Full response text..."
+                                    value={newContent}
+                                    onChange={e => setNewContent(e.target.value)}
+                                    rows={2}
+                                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-xs focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 outline-none resize-none"
+                                />
+                                <button
+                                    onClick={handleAddCanned}
+                                    disabled={isAddingCanned || !newShortcut.trim() || !newContent.trim()}
+                                    className={`flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-lg transition ${!newShortcut.trim() || !newContent.trim()
+                                        ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                        : 'bg-indigo-600 text-white hover:bg-indigo-700'
+                                        }`}
+                                >
+                                    {isAddingCanned ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
+                                    Add Template
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
                 </div>
 
                 {/* RIGHT SIDEBAR: Presets & Tips */}

@@ -73,7 +73,8 @@ export class KnowledgeService {
                         tenantId,
                         content: chunkText,
                         source,
-                        vectorId: ""
+                        vectorId: "",
+                        byteSize: Buffer.byteLength(chunkText, 'utf8')
                     }
                 });
 

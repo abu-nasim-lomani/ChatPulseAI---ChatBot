@@ -63,8 +63,12 @@ router.post('/webhook', async (req, res) => {
                     // Send typing indicator
                     await MessengerService.sendTypingIndicator(senderId, integration.accessToken);
 
-                    // 2. Process with ChatService using the Tenant's API Key
-                    const result = await ChatService.processMessage(integration.tenant.apiKey, text, senderId);
+                    // Fetch the user's real Facebook profile name and picture
+                    const { name: userName, profilePic } = await MessengerService.getUserProfile(senderId, integration.accessToken);
+
+                    // 2. Process with ChatService using the Tenant's API Key and explicitly declare 'messenger' source
+                    const formattedSenderId = `messenger-${senderId}`;
+                    const result = await ChatService.processMessage(integration.tenant.apiKey, text, formattedSenderId, 'messenger', userName, profilePic);
 
                     // 3. Send Response using the Tenant's Access Token
                     if (result.reply) {

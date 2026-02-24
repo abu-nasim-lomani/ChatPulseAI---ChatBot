@@ -180,4 +180,90 @@ router.post('/messenger/disconnect', async (req: Request, res: Response) => {
     }
 });
 
+// POST /integrations/whatsapp (Save WhatsApp Configuration)
+router.post('/whatsapp', async (req: Request, res: Response) => {
+    try {
+        const { phoneNumberId, accessToken, tenantId } = req.body;
+
+        if (!phoneNumberId || !accessToken || !tenantId) {
+            res.status(400).json({ status: 'error', message: 'Phone Number ID, Access Token, and Tenant ID are required' });
+            return;
+        }
+
+        const integration = await prisma.integration.upsert({
+            where: {
+                tenantId_provider_pageId: {
+                    tenantId: tenantId,
+                    provider: 'whatsapp',
+                    pageId: phoneNumberId // We use pageId column to store the phone number ID
+                }
+            },
+            update: {
+                accessToken: accessToken,
+            },
+            create: {
+                tenantId: tenantId,
+                provider: 'whatsapp',
+                pageId: phoneNumberId,
+                accessToken: accessToken
+            }
+        });
+
+        res.json({ status: 'success', data: integration });
+
+    } catch (error) {
+        console.error('[Integration] Error saving whatsapp config:', error);
+        res.status(500).json({ status: 'error', message: 'Internal Server Error' });
+    }
+});
+
+// GET /integrations/whatsapp/:tenantId
+router.get('/whatsapp/:tenantId', async (req: Request, res: Response) => {
+    try {
+        const tenantId = req.params.tenantId as string;
+
+        const integration = await prisma.integration.findFirst({
+            where: {
+                tenantId: tenantId,
+                provider: 'whatsapp' // Changed to whatsapp
+            }
+        });
+
+        if (integration) {
+            res.json({
+                status: 'success',
+                connected: true,
+                phoneNumberId: integration.pageId,
+                updatedAt: integration.updatedAt
+            });
+        } else {
+            res.json({ status: 'success', connected: false });
+        }
+
+    } catch (error) {
+        console.error('[Integration] Error fetching whatsapp status:', error);
+        res.status(500).json({ status: 'error', message: 'Internal Server Error' });
+    }
+});
+
+// DELETE /integrations/whatsapp
+router.post('/whatsapp/disconnect', async (req: Request, res: Response) => {
+    try {
+        const { tenantId } = req.body;
+
+        await prisma.integration.deleteMany({
+            where: {
+                tenantId: tenantId,
+                provider: 'whatsapp'
+            }
+        });
+
+        res.json({ status: 'success', message: 'Disconnected WhatsApp successfully' });
+
+    } catch (error) {
+        console.error('[Integration] Error disconnecting whatsapp:', error);
+        res.status(500).json({ status: 'error', message: 'Internal Server Error' });
+    }
+});
+
 export default router;

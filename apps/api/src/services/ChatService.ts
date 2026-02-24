@@ -1,13 +1,14 @@
 import prisma from '../lib/prisma';
-import { MockAIService } from './MockAIService';
 import { AnalyzerService } from './AnalyzerService';
 import { knowledgeService } from './KnowledgeService';
 import { getChatModel, AIProvider } from '../lib/ai-config';
 import { HumanMessage, SystemMessage, AIMessage } from "@langchain/core/messages";
+import { WhatsAppService } from './WhatsAppService';
+import { socketService } from './SocketService';
 
 
 export class ChatService {
-    static async processMessage(apiKey: string, text: string, senderId: string = 'visitor') {
+    static async processMessage(apiKey: string, text: string, senderId: string = 'visitor', source: string = 'widget', userName: string = 'Guest Visitor', profilePic: string | null = null) {
 
 
         // 1. Find Tenant
@@ -29,18 +30,36 @@ export class ChatService {
 
         // 2. Find or Create User
         // For simplicity, we use senderId as externalId. In real app, we might use cookies/JWT.
+        let externalId = senderId;
+        if (!senderId.startsWith('visitor-') && !senderId.startsWith('messenger-') && !senderId.startsWith('wa_')) {
+            externalId = 'visitor-' + senderId;
+        }
+
         let endUser = await prisma.endUser.findFirst({
-            where: { tenantId: tenant.id, externalId: 'visitor-' + senderId } // Simple hack for now
+            where: { tenantId: tenant.id, externalId: externalId } // Simple hack for now
         });
 
         if (!endUser) {
             endUser = await prisma.endUser.create({
                 data: {
                     tenantId: tenant.id,
-                    externalId: 'visitor-' + senderId,
-                    name: 'Guest Visitor'
+                    externalId: externalId,
+                    name: userName,
+                    profilePic: profilePic
                 }
             });
+        } else if ((endUser.name === 'Guest Visitor' && userName !== 'Guest Visitor') || (!endUser.profilePic && profilePic)) {
+            endUser = await prisma.endUser.update({
+                where: { id: endUser.id },
+                data: {
+                    name: userName !== 'Guest Visitor' ? userName : endUser.name,
+                    profilePic: profilePic || endUser.profilePic
+                }
+            });
+        }
+
+        if (endUser.isBlocked) {
+            throw new Error('You have been blocked from sending messages.');
         }
 
         // 3. Find or Create Session (Last 24 hours?)
@@ -63,7 +82,7 @@ export class ChatService {
         const sentiment = AnalyzerService.analyze(text);
 
         // 5. Save User Message with Sentiment
-        await prisma.chatMessage.create({
+        const userMsg = await prisma.chatMessage.create({
             data: {
                 sessionId: session.id,
                 role: 'user',
@@ -74,13 +93,26 @@ export class ChatService {
         });
 
         // Update Session Mood & Increment Unread Count
-        await prisma.chatSession.update({
+        const updatedSession = await prisma.chatSession.update({
             where: { id: session.id },
             data: {
                 currentMood: sentiment.mood,
                 unreadCount: { increment: 1 }
-            }
+            },
+            include: { endUser: true }
         });
+
+        socketService.emitNewMessage(tenant.id, session.id, userMsg);
+        socketService.emitSessionUpdate(tenant.id, { ...updatedSession, messages: [userMsg] });
+
+        // Check if session is restricted
+        if (session.isRestricted) {
+            // Real message is saved, but AI is completely silent
+            return {
+                sessionId: session.id,
+                reply: null
+            };
+        }
 
         // 6. Check if Agent is Connected (Live Chat Mode)
         if (session.status === 'agent_connected') {
@@ -95,13 +127,14 @@ export class ChatService {
         // 7. Check if Agent Requested (Waiting Mode)
         if (session.status === 'agent_requested') {
             // Don't send AI response, just save a system notification
-            await prisma.chatMessage.create({
+            const sysMsg = await prisma.chatMessage.create({
                 data: {
                     sessionId: session.id,
                     role: 'assistant',
                     content: 'Your message has been received. An agent will respond shortly.'
                 }
             });
+            socketService.emitNewMessage(tenant.id, session.id, sysMsg);
 
             return {
                 sessionId: session.id,
@@ -111,19 +144,28 @@ export class ChatService {
 
         // 8. Generate AI Response (RAG: Knowledge + History)
         let aiResponseText = "";
+        let aiTokensUsed = 0; // Initialize aiTokensUsed here
+
         try {
             // A. Retrieve Context from Knowledge Base
             const contextChunks = await knowledgeService.queryKnowledge(tenant.id, text);
             const context = contextChunks.join("\n\n");
 
-            // B. Construct System Prompt (Stronger Guidelines)
+            // E. Instantiate Dynamic AI Model for this Tenant
+            const chatConfig = tenant.chatConfig as any;
+            const activeProvider = chatConfig?.activeProvider || process.env.AI_PROVIDER || 'ollama';
+            const providerConfig = chatConfig?.providers?.[activeProvider] || {};
+            const fallbackMessage = chatConfig?.fallbackMessage || "I don't have that information right now. Would you like to speak with a human agent?";
+            const welcomeMessage = chatConfig?.welcomeMessage || '';
+
+            // B. Construct System Prompt (dynamically includes configurable fallback message)
             const defaultPrompt = `You are a professional AI customer support agent.
             
             INSTRUCTIONS:
             1. ANSWER ONLY based on the "Context" provided below.
             2. DIFFERENTIATE between "Context" (background info) and "User Query" (what they are asking right now).
-            3. If the user's message is a greeting (e.g., "hi", "hello"), respond politely without trying to force context information (e.g., "Hello! How can I assist you today?").
-            4. If the answer is NOT in the context, say: "I don't have that information right now. Would you like to speak with a human agent?"
+            3. If the user's message is a greeting (e.g., "hi", "hello"), respond politely without trying to force context information (e.g., "${welcomeMessage || 'Hello! How can I assist you today?'}").
+            4. If the answer is NOT in the context, say exactly: "${fallbackMessage}"
             5. IGNORE context that is irrelevant to the current user query.
             6. Keep answers concise, friendly, and professional.`;
 
@@ -148,10 +190,7 @@ export class ChatService {
                 })
                 .filter((m): m is HumanMessage | AIMessage => m !== null);
 
-            // E. Instantiate Dynamic AI Model for this Tenant
-            const chatConfig = tenant.chatConfig as any;
-            const activeProvider = chatConfig?.activeProvider || process.env.AI_PROVIDER || 'ollama';
-            const providerConfig = chatConfig?.providers?.[activeProvider] || {};
+
 
             const dynamicChatModel = getChatModel({
                 provider: activeProvider as AIProvider,
@@ -167,6 +206,15 @@ export class ChatService {
 
             aiResponseText = response.content as string;
 
+            // Try to extract token usage (depends on the Langchain model version/provider)
+            const usageMeta = (response as any).usage_metadata;
+            const responseMeta = (response as any).response_metadata;
+
+            aiTokensUsed = usageMeta?.total_tokens
+                || responseMeta?.tokenUsage?.totalTokens
+                || responseMeta?.estimatedTokenUsage?.totalTokens
+                || 0;
+
         } catch (error) {
             console.error("AI Generation Failed:", error);
             // Fallback if AI fails
@@ -174,14 +222,38 @@ export class ChatService {
         }
 
 
-        // 9. Save Bot Message
-        await prisma.chatMessage.create({
+        // 9. Save AI Response
+        const aiMsg = await prisma.chatMessage.create({
             data: {
                 sessionId: session.id,
                 role: 'assistant',
-                content: aiResponseText
+                content: aiResponseText,
+                tokensUsed: aiTokensUsed
             }
         });
+
+        // Update session updatedAt to ensure it moves to top
+        await prisma.chatSession.update({
+            where: { id: session.id },
+            data: { updatedAt: new Date() }
+        });
+
+        socketService.emitNewMessage(tenant.id, session.id, aiMsg);
+        // 10. Route Reply back to Source if it's WhatsApp
+        if (source === 'whatsapp') {
+            // Find the integration to get the token again (or we could pass it down, but safer to re-fetch to ensure we have it)
+            const integration = await prisma.integration.findFirst({
+                where: { tenantId: tenant.id, provider: 'whatsapp' }
+            });
+
+            if (integration && integration.pageId && integration.accessToken) {
+                // Remove the 'wa_' prefix to get pure phone number
+                const cleanPhone = senderId.replace('wa_', '');
+                await WhatsAppService.sendMessage(integration.pageId, integration.accessToken, cleanPhone, aiResponseText).catch(e => {
+                    console.error('[WhatsAppService] Failed to send AI reply:', e);
+                });
+            }
+        }
 
         return {
             sessionId: session.id,
@@ -249,14 +321,25 @@ export class ChatService {
     }
 
     static async getVisitorMessages(apiKey: string, visitorId: string) {
-        const tenant = await prisma.tenant.findUnique({ where: { apiKey } });
+        console.log(`[getVisitorMessages] START apiKey=${apiKey}, visitorId=${visitorId}`);
+        let tenant = await prisma.tenant.findUnique({ where: { apiKey } });
+        console.log(`[getVisitorMessages] tenant found by apiKey:`, !!tenant);
+
+        if (!tenant) {
+            // Fallback: Check if the key provided is actually the tenant ID
+            tenant = await prisma.tenant.findUnique({ where: { id: apiKey } });
+            console.log(`[getVisitorMessages] tenant found by id fallback:`, !!tenant);
+        }
+
         if (!tenant) return [];
 
-        const externalId = 'visitor-' + visitorId;
+        const externalId = visitorId.startsWith('visitor-') ? visitorId : 'visitor-' + visitorId;
+        console.log(`[getVisitorMessages] looking for EndUser with tenantId=${tenant.id}, externalId=${externalId}`);
 
         const endUser = await prisma.endUser.findFirst({
             where: { tenantId: tenant.id, externalId: externalId }
         });
+        console.log(`[getVisitorMessages] endUser found:`, !!endUser, endUser?.id);
 
         if (!endUser) return [];
 
@@ -265,6 +348,7 @@ export class ChatService {
             orderBy: { createdAt: 'desc' },
             include: { messages: { orderBy: { createdAt: 'asc' } } }
         });
+        console.log(`[getVisitorMessages] session found:`, !!session, session?.id, `messages count:`, session?.messages?.length);
 
         if (!session) return [];
         return session.messages;
@@ -282,46 +366,94 @@ export class ChatService {
         const isFirstReply = session.status === 'agent_requested';
 
         // Save agent's message
-        await prisma.chatMessage.create({
+        const agentMsg = await prisma.chatMessage.create({
             data: {
                 sessionId: sessionId,
                 role: 'assistant',
                 content: text
             }
         });
+        socketService.emitNewMessage(session.tenantId, sessionId, agentMsg);
 
         // Add system message if agent joining
         if (isFirstReply) {
-            await prisma.chatMessage.create({
+            const sysMsg = await prisma.chatMessage.create({
                 data: {
                     sessionId: sessionId,
                     role: 'system',
                     content: '🟢 Agent has joined the chat'
                 }
             });
+            socketService.emitNewMessage(session.tenantId, sessionId, sysMsg);
         }
 
         // Update status: first reply connects agent
-        await prisma.chatSession.update({
+        const updatedSess = await prisma.chatSession.update({
             where: { id: sessionId },
             data: {
                 updatedAt: new Date(),
                 status: isFirstReply ? 'agent_connected' : session.status  // First reply connects agent
-            }
+            },
+            include: { endUser: true }
         });
+        socketService.emitSessionUpdate(session.tenantId, { ...updatedSess, messages: [agentMsg] });
+
+        // Add dispatch logic to route the human's reply back to Facebook or WhatsApp
+        const endUser = await prisma.endUser.findUnique({ where: { id: session.endUserId || '' } });
+        console.log(`[processAgentReply Dispatch] SessionId: ${sessionId}, endUserId: ${session.endUserId}`);
+        console.log(`[processAgentReply Dispatch] endUser found:`, !!endUser);
+
+        if (endUser && endUser.externalId) {
+            const externalId = endUser.externalId;
+            console.log(`[processAgentReply Dispatch] externalId: ${externalId}`);
+
+            // Check if this is a Messenger user based on prefix or heavily numerical suffix (Facebook IDs are 15+ digit numbers)
+            // It could be 'messenger-12345', 'visitor-12345', or 'visitor-visitor-12345'
+            const isMessengerLike = externalId.startsWith('messenger-') ||
+                (externalId.includes('-') && /^\d{15,}$/.test(externalId.split('-').pop() || ''));
+
+            if (isMessengerLike) {
+                // Extract pure numeric ID
+                const messengerId = externalId.split('-').pop() || '';
+
+                const integration = await prisma.integration.findFirst({
+                    where: { tenantId: session.tenantId, provider: 'messenger' }
+                });
+                console.log(`[processAgentReply Dispatch] Messenger Integration found:`, !!integration, 'hasToken:', !!integration?.accessToken);
+
+                if (integration && integration.accessToken && messengerId) {
+                    console.log(`[processAgentReply Dispatch] Sending to Messenger ID: ${messengerId}`);
+                    // Delay import to avoid circular dependencies if any
+                    const { MessengerService } = await import('./MessengerService');
+                    await MessengerService.sendMessage(messengerId, text, integration.accessToken);
+                }
+            } else if (externalId.startsWith('wa_')) {
+                const integration = await prisma.integration.findFirst({
+                    where: { tenantId: session.tenantId, provider: 'whatsapp' }
+                });
+                if (integration && integration.pageId && integration.accessToken) {
+                    const cleanPhone = externalId.replace('wa_', '');
+                    const { WhatsAppService } = await import('./WhatsAppService');
+                    await WhatsAppService.sendMessage(integration.pageId, integration.accessToken, cleanPhone, text).catch(e => {
+                        console.error('[WhatsAppService] Failed to send Agent reply:', e);
+                    });
+                }
+            }
+        }
 
         return { status: 'sent' };
     }
 
     static async requestAgent(sessionId: string) {
         // 1. Update Session Status
-        await prisma.chatSession.update({
+        const session = await prisma.chatSession.update({
             where: { id: sessionId },
-            data: { status: 'agent_requested' }
+            data: { status: 'agent_requested' },
+            include: { endUser: true }
         });
 
         // 2. Add System Message
-        await prisma.chatMessage.create({
+        const sysMsg = await prisma.chatMessage.create({
             data: {
                 sessionId: sessionId,
                 role: 'system',
@@ -330,18 +462,22 @@ export class ChatService {
             }
         });
 
+        socketService.emitNewMessage(session.tenantId, sessionId, sysMsg);
+        socketService.emitSessionUpdate(session.tenantId, { ...session, messages: [sysMsg] });
+
         return { success: true };
     }
 
     static async endAgentChat(sessionId: string) {
         // Update session to active
-        await prisma.chatSession.update({
+        const session = await prisma.chatSession.update({
             where: { id: sessionId },
-            data: { status: 'active' }
+            data: { status: 'active' },
+            include: { endUser: true }
         });
 
         // Add system message
-        await prisma.chatMessage.create({
+        const sysMsg = await prisma.chatMessage.create({
             data: {
                 sessionId: sessionId,
                 role: 'system',
@@ -349,18 +485,22 @@ export class ChatService {
             }
         });
 
+        socketService.emitNewMessage(session.tenantId, sessionId, sysMsg);
+        socketService.emitSessionUpdate(session.tenantId, { ...session, messages: [sysMsg] });
+
         return { success: true };
     }
 
     static async acceptAgent(sessionId: string, agentName: string = 'Support Agent') {
         // Update session to agent_connected
-        await prisma.chatSession.update({
+        const session = await prisma.chatSession.update({
             where: { id: sessionId },
-            data: { status: 'agent_connected' }
+            data: { status: 'agent_connected' },
+            include: { endUser: true }
         });
 
         // Add system message
-        await prisma.chatMessage.create({
+        const sysMsg = await prisma.chatMessage.create({
             data: {
                 sessionId: sessionId,
                 role: 'system',
@@ -368,24 +508,31 @@ export class ChatService {
             }
         });
 
+        socketService.emitNewMessage(session.tenantId, sessionId, sysMsg);
+        socketService.emitSessionUpdate(session.tenantId, { ...session, messages: [sysMsg] });
+
         return { success: true };
     }
 
     static async rejectAgent(sessionId: string) {
         // Update session back to active
-        await prisma.chatSession.update({
+        const session = await prisma.chatSession.update({
             where: { id: sessionId },
-            data: { status: 'active' }
+            data: { status: 'active' },
+            include: { endUser: true }
         });
 
         // Add system message
-        await prisma.chatMessage.create({
+        const sysMsg = await prisma.chatMessage.create({
             data: {
                 sessionId: sessionId,
                 role: 'system',
                 content: '❌ Agent is currently unavailable. AI assistant will continue to help you.'
             }
         });
+
+        socketService.emitNewMessage(session.tenantId, sessionId, sysMsg);
+        socketService.emitSessionUpdate(session.tenantId, { ...session, messages: [sysMsg] });
 
         return { success: true };
     }
@@ -402,6 +549,70 @@ export class ChatService {
     static async clearConversation(sessionId: string) {
         await prisma.chatMessage.deleteMany({
             where: { sessionId: sessionId }
+        });
+        return { success: true };
+    }
+
+    static async deleteSession(sessionId: string) {
+        // 1. Delete all messages first (FK constraint)
+        await prisma.chatMessage.deleteMany({
+            where: { sessionId }
+        });
+
+        // 2. Detach any leads linked to this session
+        await (prisma as any).lead.updateMany({
+            where: { sessionId },
+            data: { sessionId: null }
+        });
+
+        // 3. Delete the session itself
+        await prisma.chatSession.delete({
+            where: { id: sessionId }
+        });
+
+        return { success: true };
+    }
+
+    static async blockUser(sessionId: string) {
+        const session = await prisma.chatSession.findUnique({
+            where: { id: sessionId },
+            select: { endUserId: true }
+        });
+        if (!session?.endUserId) throw new Error('Session or user not found');
+
+        await prisma.endUser.update({
+            where: { id: session.endUserId },
+            data: { isBlocked: true }
+        });
+        return { success: true };
+    }
+
+    static async unblockUser(sessionId: string) {
+        const session = await prisma.chatSession.findUnique({
+            where: { id: sessionId },
+            select: { endUserId: true }
+        });
+        if (!session?.endUserId) throw new Error('Session or user not found');
+
+        await prisma.endUser.update({
+            where: { id: session.endUserId },
+            data: { isBlocked: false }
+        });
+        return { success: true };
+    }
+
+    static async restrictSession(sessionId: string) {
+        await prisma.chatSession.update({
+            where: { id: sessionId },
+            data: { isRestricted: true }
+        });
+        return { success: true };
+    }
+
+    static async unrestrictSession(sessionId: string) {
+        await prisma.chatSession.update({
+            where: { id: sessionId },
+            data: { isRestricted: false }
         });
         return { success: true };
     }

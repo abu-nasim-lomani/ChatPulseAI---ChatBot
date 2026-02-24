@@ -167,4 +167,86 @@ router.post('/clear-conversation', async (req: Request, res: Response) => {
     }
 });
 
+// POST /chats/delete-session
+router.post('/delete-session', async (req: Request, res: Response) => {
+    try {
+        const { sessionId } = req.body;
+
+        if (!sessionId) {
+            res.status(400).json({ status: 'error', message: 'Session ID is required' });
+            return;
+        }
+
+        await ChatService.deleteSession(sessionId);
+        res.json({ status: 'success' });
+    } catch (error) {
+        console.error("Delete Session Error:", error);
+        res.status(500).json({ status: 'error', message: error instanceof Error ? error.message : 'Internal Server Error' });
+    }
+});
+
+// POST /chats/block-user
+router.post('/block-user', async (req: Request, res: Response) => {
+    try {
+        const { sessionId } = req.body;
+        if (!sessionId) {
+            res.status(400).json({ status: 'error', message: 'Session ID is required' });
+            return;
+        }
+        await ChatService.blockUser(sessionId);
+        res.json({ status: 'success' });
+    } catch (error) {
+        console.error("Block User Error:", error);
+        res.status(500).json({ status: 'error', message: error instanceof Error ? error.message : 'Internal Server Error' });
+    }
+});
+
+// POST /chats/unblock-user
+router.post('/unblock-user', async (req: Request, res: Response) => {
+    try {
+        const { sessionId } = req.body;
+        if (!sessionId) {
+            res.status(400).json({ status: 'error', message: 'Session ID is required' });
+            return;
+        }
+        await ChatService.unblockUser(sessionId);
+        res.json({ status: 'success' });
+    } catch (error) {
+        console.error("Unblock User Error:", error);
+        res.status(500).json({ status: 'error', message: error instanceof Error ? error.message : 'Internal Server Error' });
+    }
+});
+
+// POST /chats/restrict-session
+router.post('/restrict-session', async (req: Request, res: Response) => {
+    try {
+        const { sessionId } = req.body;
+        if (!sessionId) {
+            res.status(400).json({ status: 'error', message: 'Session ID is required' });
+            return;
+        }
+        await ChatService.restrictSession(sessionId);
+        res.json({ status: 'success' });
+    } catch (error) {
+        console.error("Restrict Session Error:", error);
+        res.status(500).json({ status: 'error', message: error instanceof Error ? error.message : 'Internal Server Error' });
+    }
+});
+
+// POST /chats/unrestrict-session
+router.post('/unrestrict-session', async (req: Request, res: Response) => {
+    try {
+        const { sessionId } = req.body;
+        if (!sessionId) {
+            res.status(400).json({ status: 'error', message: 'Session ID is required' });
+            return;
+        }
+        await ChatService.unrestrictSession(sessionId);
+        res.json({ status: 'success' });
+    } catch (error) {
+        console.error("Unrestrict Session Error:", error);
+        res.status(500).json({ status: 'error', message: error instanceof Error ? error.message : 'Internal Server Error' });
+    }
+});
+
 export default router;

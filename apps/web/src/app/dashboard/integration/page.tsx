@@ -5,6 +5,7 @@ import { useAuth } from '../../../context/AuthContext';
 import { Copy, Check, ExternalLink, Settings, Code, Zap } from 'lucide-react';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
+import WhatsAppIntegration from './components/WhatsAppIntegration';
 
 export default function IntegrationPage() {
     const { user, isLoading } = useAuth();
@@ -68,6 +69,13 @@ export default function IntegrationPage() {
                     <div className="flex flex-col gap-1">
                         <Suspense fallback={<div className="animate-pulse h-64 bg-slate-50 rounded-2xl border border-slate-100"></div>}>
                             <FacebookIntegration tenantId={user.tenantId} />
+                        </Suspense>
+                    </div>
+
+                    {/* WhatsApp Cloud API Card */}
+                    <div className="flex flex-col gap-1">
+                        <Suspense fallback={<div className="animate-pulse h-64 bg-slate-50 rounded-2xl border border-slate-100"></div>}>
+                            <WhatsAppIntegration tenantId={user.tenantId} />
                         </Suspense>
                     </div>
 
@@ -200,8 +208,8 @@ function FacebookIntegration({ tenantId }: { tenantId: string }) {
     const searchParams = useSearchParams();
     const router = useRouter();
     const [fbToken, setFbToken] = useState<string>(searchParams?.get('fb_token') || '');
-    const [pages, setPages] = useState<any[]>([]);
-    const [selectedPage, setSelectedPage] = useState<any>(null);
+    const [pages, setPages] = useState<{ id: string; name: string; access_token: string }[]>([]);
+    const [selectedPage, setSelectedPage] = useState<{ id: string; name: string; access_token: string } | null>(null);
 
     const [loading, setLoading] = useState(false);
     const [connected, setConnected] = useState(false);
@@ -349,7 +357,7 @@ function FacebookIntegration({ tenantId }: { tenantId: string }) {
                                             value={selectedPage?.id || ''}
                                             onChange={(e) => {
                                                 const p = pages.find(p => p.id === e.target.value);
-                                                setSelectedPage(p);
+                                                setSelectedPage(p ?? null);
                                             }}
                                         >
                                             {pages.map(p => (

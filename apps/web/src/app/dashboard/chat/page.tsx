@@ -2,13 +2,21 @@
 import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { format } from 'date-fns';
+import { io, Socket } from 'socket.io-client';
 import { useAuth } from '../../../context/AuthContext';
 import {
     Search, Send, Paperclip, Image as ImageIcon, Smile, MoreVertical,
-    X, Check, Clock, MapPin, Tag, User,
-    MessageSquare, Filter, ChevronLeft, Calendar,
-    Trash2, Ban, Lock, CornerUpRight, EyeOff, Eraser
+    X, Check, Clock, Tag, User,
+    MessageSquare, ChevronLeft, Calendar,
+    Trash2, Ban, Lock, CornerUpRight, EyeOff, Eraser, Zap, StickyNote
 } from 'lucide-react';
+
+interface CannedResponse {
+    id: string;
+    shortcut: string;
+    title: string;
+    content: string;
+}
 
 interface ChatMessage {
     id: number | string;
@@ -25,7 +33,7 @@ interface ChatSession {
     updatedAt: string;
     isRestricted?: boolean;
     unreadCount?: number;
-    endUser?: { name?: string; externalId?: string; email?: string; isBlocked?: boolean };
+    endUser?: { name?: string; externalId?: string; email?: string; isBlocked?: boolean; profilePic?: string };
     messages: ChatMessage[];
 }
 
@@ -37,10 +45,57 @@ export default function ChatDashboard() {
     const [searchTerm, setSearchTerm] = useState("");
     const [replyText, setReplyText] = useState("");
     const [showMenu, setShowMenu] = useState(false);
+    const [activeFilter, setActiveFilter] = useState<'all' | 'waiting' | 'live' | 'blocked'>('all');
+    const [cannedResponses, setCannedResponses] = useState<CannedResponse[]>([]);
+    const [cannedSearch, setCannedSearch] = useState("");
+    const [showCannedPicker, setShowCannedPicker] = useState(false);
+    const [agentNotes, setAgentNotes] = useState<{ id: string; agentName?: string; content: string; createdAt: string }[]>([]);
+    const [noteText, setNoteText] = useState("");
+    const [noteSaving, setNoteSaving] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
     const menuRef = useRef<HTMLDivElement>(null);
+    const prevUnreadRef = useRef<number>(0);
+    const originalTitleRef = useRef<string>('Inbox | Dashboard');
+    const isInitializedRef = useRef<boolean>(false);
+    const audioCtxRef = useRef<AudioContext | null>(null);
+    const socketRef = useRef<Socket | null>(null);
+
+    // Unlock AudioContext on first user click (browser requires gesture)
+    useEffect(() => {
+        const unlock = () => {
+            if (!audioCtxRef.current) {
+                audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+            }
+            if (audioCtxRef.current.state === 'suspended') {
+                audioCtxRef.current.resume();
+            }
+        };
+        window.addEventListener('click', unlock, { once: true });
+        return () => window.removeEventListener('click', unlock);
+    }, []);
+
+    // Play a clean notification sound using Web Audio API
+    const playNotificationSound = () => {
+        try {
+            const ctx = audioCtxRef.current;
+            if (!ctx || ctx.state === 'suspended') return;
+            const oscillator = ctx.createOscillator();
+            const gainNode = ctx.createGain();
+            oscillator.connect(gainNode);
+            gainNode.connect(ctx.destination);
+            oscillator.type = 'sine';
+            oscillator.frequency.setValueAtTime(880, ctx.currentTime);
+            oscillator.frequency.setValueAtTime(660, ctx.currentTime + 0.1);
+            gainNode.gain.setValueAtTime(0.35, ctx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+            oscillator.start(ctx.currentTime);
+            oscillator.stop(ctx.currentTime + 0.35);
+        } catch {
+            // Browser blocked audio — silently ignore
+        }
+    };
 
     // Scroll to bottom logic
     useEffect(() => {
@@ -70,13 +125,97 @@ export default function ChatDashboard() {
         };
     }, []);
 
+    // Sound alert + tab title badge when new unread messages arrive
+    useEffect(() => {
+        if (!sessions.length) return;
+        const totalUnread = sessions.reduce((sum, s) => sum + (s.unreadCount || 0), 0);
+
+        // First load: silently sync the baseline without triggering a sound
+        if (!isInitializedRef.current) {
+            prevUnreadRef.current = totalUnread;
+            isInitializedRef.current = true;
+            return;
+        }
+
+        if (totalUnread > prevUnreadRef.current) {
+            // Genuinely new message — play sound and update tab title
+            playNotificationSound();
+            document.title = `(${totalUnread}) New Message${totalUnread > 1 ? 's' : ''} | Inbox`;
+        } else if (totalUnread === 0) {
+            document.title = originalTitleRef.current;
+        }
+        prevUnreadRef.current = totalUnread;
+    }, [sessions]);
+
+    // Reset tab title when agent focuses the tab
+    useEffect(() => {
+        const handleVisibility = () => {
+            if (document.visibilityState === 'visible') {
+                const totalUnread = sessions.reduce((sum, s) => sum + (s.unreadCount || 0), 0);
+                if (totalUnread === 0) document.title = originalTitleRef.current;
+            }
+        };
+        document.addEventListener('visibilitychange', handleVisibility);
+        return () => {
+            document.removeEventListener('visibilitychange', handleVisibility);
+            document.title = originalTitleRef.current;
+        };
+    }, [sessions]);
+
     const { user, isLoading } = useAuth();
     const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
     // Fetch Sessions
     useEffect(() => {
         if (isLoading || !user?.tenantId) return;
+        axios.get(`${API_URL}/canned-responses/${user.tenantId}`)
+            .then(res => setCannedResponses(res.data.data || []))
+            .catch(() => { });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [user?.tenantId, isLoading]);
 
+    // Fetch Sessions & Initialize WebSocket
+    useEffect(() => {
+        if (isLoading || !user?.tenantId) return;
+
+        // 1. WebSocket Setup
+        if (!socketRef.current) {
+            socketRef.current = io(API_URL);
+
+            socketRef.current.on('connect', () => {
+                console.log('[Socket] Connected to server, joining room for tenant:', user.tenantId);
+                socketRef.current?.emit('join_tenant', user.tenantId);
+            });
+
+            socketRef.current.on('new_message', (payload: { sessionId: string, message: ChatMessage }) => {
+                // If the message belongs to the currently selected session, immediately show it
+                setSelectedSessionId(currentId => {
+                    if (currentId === payload.sessionId) {
+                        setMessages(prev => {
+                            // Deduplicate by message ID to prevent React duplicate key errors
+                            if (prev.some(m => m.id === payload.message.id)) {
+                                return prev;
+                            }
+                            return [...prev, payload.message];
+                        });
+                        // Mark as read immediately via API since we are actively looking at it
+                        axios.post(`${API_URL}/chats/read`, { sessionId: currentId }).catch(() => { });
+                    }
+                    return currentId;
+                });
+            });
+
+            socketRef.current.on('session_update', (payload: { session: ChatSession }) => {
+                // Instantly update the session in the sidebar, move it to the top
+                setSessions(prev => {
+                    const filtered = prev.filter(s => s.id !== payload.session.id);
+                    // Avoid putting restricted/blocked back if we're filtering them in the UI logic later
+                    return [payload.session, ...filtered];
+                });
+            });
+        }
+
+        // 2. Initial Fetch
         const fetchSessions = async () => {
             try {
                 const res = await axios.get(`${API_URL}/chats/sessions/${user.tenantId}`);
@@ -86,8 +225,15 @@ export default function ChatDashboard() {
             }
         };
         fetchSessions();
-        const interval = setInterval(fetchSessions, 5000);
-        return () => clearInterval(interval);
+
+        // 3. Graceful Fallback Polling (Reduced frequency from 5s to 30s)
+        const interval = setInterval(fetchSessions, 30000);
+
+        return () => {
+            clearInterval(interval);
+            // We intentionally keep the socket alive across re-renders to avoid flicker,
+            // but in a strict unmount, we could disconnect. For now, let it persist.
+        };
     }, [user?.tenantId, isLoading, API_URL]);
 
     // Fetch Messages when session selected & Mark as Read
@@ -112,28 +258,52 @@ export default function ChatDashboard() {
             }
         };
         fetchMessagesAndMarkRead();
-        const interval = setInterval(fetchMessagesAndMarkRead, 3000);
+        // Fallback polling reduced from 3s to 30s
+        const interval = setInterval(fetchMessagesAndMarkRead, 30000);
         return () => clearInterval(interval);
     }, [selectedSessionId, API_URL]);
 
-    // (auto-scroll reset is handled in the session selection handler below)
+    // Fetch agent notes when session changes
+    useEffect(() => {
+        if (!selectedSessionId) { setAgentNotes([]); return; }
+        axios.get(`${API_URL}/notes/${selectedSessionId}`)
+            .then(res => setAgentNotes(res.data.data || []))
+            .catch(() => setAgentNotes([]));
+    }, [selectedSessionId, API_URL]);
+
+    const handleAddNote = async () => {
+        if (!noteText.trim() || !selectedSessionId) return;
+        setNoteSaving(true);
+        try {
+            const res = await axios.post(`${API_URL}/notes`, {
+                sessionId: selectedSessionId,
+                agentName: user?.name || 'Agent',
+                content: noteText.trim(),
+            });
+            setAgentNotes(prev => [res.data.data, ...prev]);
+            setNoteText("");
+        } catch { /* silent */ } finally { setNoteSaving(false); }
+    };
+
+    const handleDeleteNote = async (noteId: string) => {
+        try {
+            await axios.delete(`${API_URL}/notes/${noteId}`);
+            setAgentNotes(prev => prev.filter(n => n.id !== noteId));
+        } catch { /* silent */ }
+    };
 
     const handleReply = async () => {
         if (!replyText.trim() || !selectedSessionId) return;
 
         try {
-            const tempMsg = {
-                id: Date.now(),
-                role: 'assistant',
-                content: replyText,
-                createdAt: new Date().toISOString()
-            };
-            setMessages([...messages, tempMsg]);
-            setReplyText("");
+            const textToSend = replyText;
+            setReplyText(""); // Clear input instantly for snappy feel
 
+            // We no longer need optimistic UI updates like tempMsg 
+            // because the Socket.io connection will echo our sent message back to us instantly.
             await axios.post(`${API_URL}/chats/reply`, {
                 sessionId: selectedSessionId,
-                text: tempMsg.content
+                text: textToSend
             });
         } catch (err) {
             console.error("Failed to send reply", err);
@@ -286,10 +456,15 @@ export default function ChatDashboard() {
     };
 
     const selectedSession = sessions.find(s => s.id === selectedSessionId);
-    const filteredSessions = sessions.filter(s =>
-        (s.endUser?.name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (s.messages[0]?.content || "").toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    const filteredSessions = sessions.filter(s => {
+        const matchSearch = (s.endUser?.name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+            (s.messages[0]?.content || "").toLowerCase().includes(searchTerm.toLowerCase());
+        if (!matchSearch) return false;
+        if (activeFilter === 'waiting') return s.status === 'agent_requested';
+        if (activeFilter === 'live') return s.status === 'agent_connected';
+        if (activeFilter === 'blocked') return s.endUser?.isBlocked === true;
+        return true; // 'all'
+    });
 
     return (
         <div className="flex h-[calc(100vh-2.5rem)] md:h-[calc(100vh-4.5rem)] bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden font-sans text-gray-900">
@@ -302,16 +477,13 @@ export default function ChatDashboard() {
                     <h1 className="text-lg font-bold text-gray-900 tracking-tight flex items-center gap-2">
                         Inbox
                         <span className="bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-full text-[10px] font-bold border border-indigo-100">
-                            {sessions.length}
+                            {filteredSessions.length}
                         </span>
                     </h1>
-                    <button className="text-gray-400 hover:text-gray-600 p-1 rounded-md hover:bg-gray-50 transition">
-                        <Filter size={16} />
-                    </button>
                 </div>
 
                 {/* Search */}
-                <div className="p-3 border-b border-gray-50 bg-gray-50/50">
+                <div className="p-3 bg-gray-50/50">
                     <div className="relative group">
                         <input
                             type="text"
@@ -322,6 +494,27 @@ export default function ChatDashboard() {
                         />
                         <Search className="w-4 h-4 text-gray-400 absolute left-3 top-2.5 group-hover:text-gray-500 transition-colors" />
                     </div>
+                </div>
+
+                {/* Filter Tabs */}
+                <div className="flex items-center gap-1 px-3 pb-2 border-b border-gray-100 overflow-x-auto">
+                    {([
+                        { key: 'all', label: 'All', count: sessions.length },
+                        { key: 'waiting', label: '⏳ Waiting', count: sessions.filter(s => s.status === 'agent_requested').length },
+                        { key: 'live', label: '🟢 Live', count: sessions.filter(s => s.status === 'agent_connected').length },
+                        { key: 'blocked', label: '🚫 Blocked', count: sessions.filter(s => s.endUser?.isBlocked).length },
+                    ] as const).map(tab => (
+                        <button
+                            key={tab.key}
+                            onClick={() => setActiveFilter(tab.key)}
+                            className={`flex-shrink-0 text-[10px] font-bold px-2.5 py-1 rounded-full transition-all ${activeFilter === tab.key
+                                ? 'bg-indigo-600 text-white shadow-sm'
+                                : 'text-gray-500 hover:bg-gray-100'
+                                }`}
+                        >
+                            {tab.label}{tab.count > 0 && <span className="ml-1 opacity-75">({tab.count})</span>}
+                        </button>
+                    ))}
                 </div>
 
                 {/* List */}
@@ -369,9 +562,13 @@ export default function ChatDashboard() {
                                 >
                                     <div className="flex items-start gap-3">
                                         <div className="relative flex-shrink-0">
-                                            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-400 to-purple-500 flex items-center justify-center text-white font-bold text-sm shadow-sm ring-2 ring-white">
-                                                {session.endUser?.name?.charAt(0) || 'V'}
-                                            </div>
+                                            {session.endUser?.profilePic ? (
+                                                <img src={session.endUser.profilePic} alt={session.endUser.name || 'User'} className="w-10 h-10 rounded-full object-cover shadow-sm ring-2 ring-white" />
+                                            ) : (
+                                                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-400 to-purple-500 flex items-center justify-center text-white font-bold text-sm shadow-sm ring-2 ring-white">
+                                                    {session.endUser?.name?.charAt(0) || 'V'}
+                                                </div>
+                                            )}
                                             {isOnline && (
                                                 <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></div>
                                             )}
@@ -442,9 +639,13 @@ export default function ChatDashboard() {
                                 </button>
 
                                 <div className="relative">
-                                    <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-sm shadow-sm">
-                                        {(selectedSession?.endUser?.name || 'V').charAt(0)}
-                                    </div>
+                                    {selectedSession?.endUser?.profilePic ? (
+                                        <img src={selectedSession.endUser.profilePic} alt={selectedSession.endUser.name || 'User'} className="w-9 h-9 rounded-full object-cover shadow-sm" />
+                                    ) : (
+                                        <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-sm shadow-sm">
+                                            {(selectedSession?.endUser?.name || 'V').charAt(0)}
+                                        </div>
+                                    )}
                                     <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 border-2 border-white rounded-full"></div>
                                 </div>
                                 <div>
@@ -590,13 +791,56 @@ export default function ChatDashboard() {
 
                         {/* Input Area */}
                         <div className="p-4 bg-white border-t border-gray-100">
+                            {/* Canned Response Picker */}
+                            {showCannedPicker && (() => {
+                                const filtered = cannedResponses.filter(r =>
+                                    r.shortcut.includes(cannedSearch) ||
+                                    r.title.toLowerCase().includes(cannedSearch)
+                                );
+                                if (!filtered.length) return null;
+                                return (
+                                    <div className="mb-2 bg-white rounded-xl border border-gray-200 shadow-lg overflow-hidden max-h-48 overflow-y-auto">
+                                        <div className="px-3 py-1.5 bg-gray-50 border-b border-gray-100 flex items-center gap-1.5">
+                                            <Zap size={11} className="text-indigo-500" />
+                                            <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Quick Replies — type shortcut or press Esc to close</span>
+                                        </div>
+                                        {filtered.map(r => (
+                                            <button
+                                                key={r.id}
+                                                className="w-full text-left px-3 py-2 hover:bg-indigo-50 transition text-xs flex items-start gap-3 border-b border-gray-50 last:border-0"
+                                                onMouseDown={(e) => {
+                                                    e.preventDefault();
+                                                    setReplyText(r.content);
+                                                    setShowCannedPicker(false);
+                                                }}
+                                            >
+                                                <span className="font-mono text-[10px] bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded font-bold flex-shrink-0">/{r.shortcut}</span>
+                                                <div className="min-w-0">
+                                                    <p className="font-semibold text-gray-800 truncate text-[11px]">{r.title}</p>
+                                                    <p className="text-gray-500 truncate text-[10px]">{r.content}</p>
+                                                </div>
+                                            </button>
+                                        ))}
+                                    </div>
+                                );
+                            })()}
                             <div className="flex flex-col bg-gray-50 border border-gray-200 rounded-xl focus-within:ring-2 focus-within:ring-indigo-500/20 focus-within:border-indigo-500 transition-all shadow-inner">
                                 <textarea
                                     className="w-full bg-transparent border-0 text-xs text-gray-700 placeholder-gray-400 px-4 py-3 min-h-[50px] max-h-32 resize-none outline-none focus:ring-0"
                                     placeholder="Type your reply here..."
                                     value={replyText}
-                                    onChange={(e) => setReplyText(e.target.value)}
+                                    onChange={(e) => {
+                                        const val = e.target.value;
+                                        setReplyText(val);
+                                        if (val.startsWith('/')) {
+                                            setCannedSearch(val.slice(1).toLowerCase());
+                                            setShowCannedPicker(true);
+                                        } else {
+                                            setShowCannedPicker(false);
+                                        }
+                                    }}
                                     onKeyDown={(e) => {
+                                        if (e.key === 'Escape') setShowCannedPicker(false);
                                         if (e.key === 'Enter' && !e.shiftKey) {
                                             e.preventDefault();
                                             handleReply();
@@ -644,77 +888,188 @@ export default function ChatDashboard() {
             </div>
 
             {/* RIGHT SIDEBAR: Customer Details */}
-            {selectedSessionId && (
-                <div className="w-64 bg-white border-l border-gray-100 hidden lg:flex flex-col overflow-y-auto">
-                    <div className="p-6 border-b border-gray-100 flex flex-col items-center text-center bg-gradient-to-b from-gray-50/50 to-white">
-                        <div className="w-20 h-20 bg-indigo-100 rounded-full flex items-center justify-center text-2xl font-bold text-indigo-600 mb-4 shadow-sm ring-4 ring-white">
-                            {(selectedSession?.endUser?.name || 'V').charAt(0)}
-                        </div>
-                        <h3 className="font-bold text-base text-gray-900">{selectedSession?.endUser?.name || 'Visitor'}</h3>
-                        <p className="text-[11px] text-gray-500 font-mono mt-1 px-2 py-0.5 bg-gray-100 rounded text-center">
-                            {selectedSession?.endUser?.email || 'user@example.com'}
-                        </p>
-                    </div>
+            {selectedSessionId && (() => {
+                const user = selectedSession?.endUser;
+                const externalId = user?.externalId || '';
+                const platform = externalId.startsWith('messenger-') ? 'Messenger'
+                    : externalId.startsWith('wa_') ? 'WhatsApp'
+                        : 'Widget';
+                const platformColors: Record<string, string> = {
+                    'Messenger': 'bg-blue-50 text-blue-700 border-blue-100',
+                    'WhatsApp': 'bg-green-50 text-green-700 border-green-100',
+                    'Widget': 'bg-indigo-50 text-indigo-700 border-indigo-100',
+                };
+                const moodColors: Record<string, string> = {
+                    frustrated: 'bg-orange-50 text-orange-700',
+                    furious: 'bg-red-50 text-red-700',
+                    neutral: 'bg-gray-50 text-gray-600',
+                };
 
-                    <div className="p-6 space-y-6">
-                        {/* Status Card */}
-                        <div className="bg-gray-50 rounded-xl p-4 border border-gray-100">
-                            <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3">Current Status</h4>
-                            <div className="flex items-center gap-3 mb-2">
-                                <div className="w-2 h-2 rounded-full bg-green-500"></div>
-                                <span className="text-xs font-semibold text-gray-700">Online</span>
-                            </div>
-                            <div className="flex items-center gap-2 text-[10px] text-gray-500">
-                                <Clock size={12} />
-                                Local time: {format(new Date(), 'h:mm a')}
+                return (
+                    <div className="w-64 bg-white border-l border-gray-100 hidden lg:flex flex-col overflow-y-auto">
+                        {/* Avatar & Name */}
+                        <div className="p-5 border-b border-gray-100 flex flex-col items-center text-center bg-gradient-to-b from-gray-50/50 to-white">
+                            {user?.profilePic ? (
+                                <img src={user.profilePic} alt={user.name || 'User'} className="w-20 h-20 rounded-full object-cover mb-3 shadow-sm ring-4 ring-white" />
+                            ) : (
+                                <div className="w-20 h-20 bg-gradient-to-br from-indigo-400 to-purple-500 rounded-full flex items-center justify-center text-2xl font-bold text-white mb-3 shadow-sm ring-4 ring-white">
+                                    {(user?.name || 'V').charAt(0).toUpperCase()}
+                                </div>
+                            )}
+                            <h3 className="font-bold text-sm text-gray-900 leading-tight">{user?.name || 'Visitor'}</h3>
+                            {user?.email && (
+                                <p className="text-[10px] text-gray-500 font-mono mt-1 px-2 py-0.5 bg-gray-100 rounded">{user.email}</p>
+                            )}
+                            <div className="flex gap-1.5 mt-2 flex-wrap justify-center">
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${platformColors[platform]}`}>{platform}</span>
+                                {user?.isBlocked && (
+                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-red-50 text-red-700 border-red-100">🚫 Blocked</span>
+                                )}
+                                {selectedSession?.isRestricted && (
+                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-amber-50 text-amber-700 border-amber-100">🔇 AI Muted</span>
+                                )}
                             </div>
                         </div>
 
-                        {/* Details */}
-                        <div>
-                            <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-2">
-                                <User size={12} /> Customer Details
-                            </h4>
-                            <div className="space-y-3">
-                                <div className="flex items-start gap-3 text-xs">
-                                    <MapPin size={14} className="text-gray-400 mt-0.5" />
-                                    <div>
-                                        <p className="font-medium text-gray-900">Dhaka, Bangladesh</p>
-                                        <p className="text-[10px] text-gray-500">IP: 192.168.1.1</p>
+                        <div className="p-4 space-y-4">
+                            {/* Session Status */}
+                            <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
+                                <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Session Status</h4>
+                                <div className="flex items-center gap-2">
+                                    <div className={`w-2 h-2 rounded-full ${selectedSession?.status === 'agent_connected' ? 'bg-green-500 animate-pulse'
+                                        : selectedSession?.status === 'agent_requested' ? 'bg-amber-500 animate-pulse'
+                                            : 'bg-gray-300'
+                                        }`}></div>
+                                    <span className="text-xs font-semibold text-gray-700 capitalize">
+                                        {selectedSession?.status === 'agent_connected' ? 'Live Agent'
+                                            : selectedSession?.status === 'agent_requested' ? 'Waiting for Agent'
+                                                : 'AI Chat'}
+                                    </span>
+                                </div>
+                                {selectedSession?.currentMood && (
+                                    <div className={`mt-2 text-[10px] px-2 py-1 rounded-lg font-medium ${moodColors[selectedSession.currentMood] || 'bg-gray-50 text-gray-600'}`}>
+                                        {selectedSession.currentMood === 'frustrated' ? '😤 Frustrated'
+                                            : selectedSession.currentMood === 'furious' ? '😡 Furious'
+                                                : '😐 Neutral'}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Details */}
+                            <div>
+                                <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                                    <User size={11} /> User Details
+                                </h4>
+                                <div className="space-y-2.5">
+                                    <div className="flex items-start gap-2 text-xs">
+                                        <Calendar size={13} className="text-gray-400 mt-0.5 flex-shrink-0" />
+                                        <div>
+                                            <p className="text-[10px] text-gray-400">First Seen</p>
+                                            <p className="font-medium text-gray-800 text-[11px]">
+                                                {selectedSession?.updatedAt
+                                                    ? format(new Date(selectedSession.updatedAt), 'dd MMM yyyy, h:mm a')
+                                                    : '—'}
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-start gap-2 text-xs">
+                                        <Tag size={13} className="text-gray-400 mt-0.5 flex-shrink-0" />
+                                        <div className="min-w-0">
+                                            <p className="text-[10px] text-gray-400">User ID</p>
+                                            <p className="font-mono text-[10px] text-gray-600 truncate">{externalId || '—'}</p>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-start gap-2 text-xs">
+                                        <MessageSquare size={13} className="text-gray-400 mt-0.5 flex-shrink-0" />
+                                        <div>
+                                            <p className="text-[10px] text-gray-400">Messages</p>
+                                            <p className="font-medium text-gray-800 text-[11px]">{messages.length} in this session</p>
+                                        </div>
                                     </div>
                                 </div>
-                                <div className="flex items-start gap-3 text-xs">
-                                    <Calendar size={14} className="text-gray-400 mt-0.5" />
-                                    <div>
-                                        <p className="font-medium text-gray-900">First Seen</p>
-                                        <p className="text-[10px] text-gray-500">2 days ago</p>
+                            </div>
+
+                            {/* Quick Actions */}
+                            <div>
+                                <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Quick Actions</h4>
+                                <div className="space-y-1.5">
+                                    <button
+                                        onClick={() => handleMenuAction('block')}
+                                        className={`w-full py-1.5 rounded-lg text-[11px] font-bold transition border ${user?.isBlocked
+                                            ? 'bg-green-50 text-green-700 border-green-100 hover:bg-green-100'
+                                            : 'bg-red-50 text-red-700 border-red-100 hover:bg-red-100'
+                                            }`}
+                                    >
+                                        {user?.isBlocked ? '✅ Unblock User' : '🚫 Block User'}
+                                    </button>
+                                    <button
+                                        onClick={() => handleMenuAction('restricted')}
+                                        className={`w-full py-1.5 rounded-lg text-[11px] font-bold transition border ${selectedSession?.isRestricted
+                                            ? 'bg-indigo-50 text-indigo-700 border-indigo-100 hover:bg-indigo-100'
+                                            : 'bg-amber-50 text-amber-700 border-amber-100 hover:bg-amber-100'
+                                            }`}
+                                    >
+                                        {selectedSession?.isRestricted ? '🔊 Enable AI' : '🔇 Mute AI'}
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Private Notes */}
+                            <div>
+                                <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                                    <StickyNote size={11} className="text-amber-500" /> Private Notes
+                                    <span className="text-[9px] text-gray-300 font-normal ml-auto">Agent only</span>
+                                </h4>
+
+                                {/* Existing notes */}
+                                {agentNotes.length > 0 && (
+                                    <div className="space-y-1.5 mb-2 max-h-40 overflow-y-auto pr-0.5">
+                                        {agentNotes.map(note => (
+                                            <div key={note.id} className="bg-amber-50 border border-amber-100 rounded-lg p-2.5 group relative">
+                                                <p className="text-[10px] text-gray-700 leading-relaxed">{note.content}</p>
+                                                <div className="flex items-center justify-between mt-1.5">
+                                                    <span className="text-[9px] text-gray-400">
+                                                        {note.agentName} · {format(new Date(note.createdAt), 'h:mm a')}
+                                                    </span>
+                                                    <button
+                                                        onClick={() => handleDeleteNote(note.id)}
+                                                        className="text-gray-300 hover:text-red-400 transition opacity-0 group-hover:opacity-100"
+                                                    >
+                                                        <X size={10} />
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        ))}
                                     </div>
+                                )}
+
+                                {/* Add note */}
+                                <div className="space-y-1.5">
+                                    <textarea
+                                        value={noteText}
+                                        onChange={e => setNoteText(e.target.value)}
+                                        placeholder="Add a private note..."
+                                        rows={2}
+                                        className="w-full px-2.5 py-2 border border-gray-200 rounded-lg text-[11px] text-gray-700 placeholder-gray-400 resize-none outline-none focus:ring-1 focus:ring-amber-400 focus:border-amber-400 transition"
+                                        onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAddNote(); } }}
+                                    />
+                                    <button
+                                        onClick={handleAddNote}
+                                        disabled={noteSaving || !noteText.trim()}
+                                        className={`w-full py-1.5 rounded-lg text-[11px] font-bold transition ${noteText.trim()
+                                            ? 'bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100'
+                                            : 'bg-gray-50 text-gray-300 border border-gray-100 cursor-not-allowed'
+                                            }`}
+                                    >
+                                        {noteSaving ? 'Saving...' : '+ Save Note'}
+                                    </button>
                                 </div>
                             </div>
                         </div>
-
-                        {/* Tags */}
-                        <div>
-                            <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-2">
-                                <Tag size={12} /> Tags
-                            </h4>
-                            <div className="flex flex-wrap gap-2">
-                                <span className="px-2 py-1 bg-indigo-50 text-indigo-700 text-[10px] rounded-md font-bold border border-indigo-100">Lead</span>
-                                <span className="px-2 py-1 bg-purple-50 text-purple-700 text-[10px] rounded-md font-bold border border-purple-100">New User</span>
-                                <button className="px-2 py-1 bg-gray-50 text-gray-400 text-[10px] rounded-md border border-gray-200 border-dashed hover:border-gray-300 hover:text-gray-600 transition">
-                                    + Add
-                                </button>
-                            </div>
-                        </div>
-
-                        <div className="pt-4 mt-auto">
-                            <button className="w-full py-2 bg-white border border-gray-200 rounded-lg text-xs font-bold text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition shadow-xs">
-                                View Full CRM Profile
-                            </button>
-                        </div>
                     </div>
-                </div>
-            )}
+                );
+            })()}
+
         </div>
     );
 }

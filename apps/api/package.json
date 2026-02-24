@@ -36,6 +36,7 @@
     "pdf-parse": "^2.4.5",
     "prisma": "5.22.0",
     "sentiment": "^5.0.2",
+    "socket.io": "^4.8.3",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

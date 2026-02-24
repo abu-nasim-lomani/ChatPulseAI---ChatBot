@@ -79,7 +79,7 @@ router.post('/lead', async (req, res) => {
             return;
         }
 
-        const lead = await prisma.lead.create({
+        const lead = await (prisma as any).lead.create({
             data: {
                 tenantId: tenant.id,
                 name: name || null,

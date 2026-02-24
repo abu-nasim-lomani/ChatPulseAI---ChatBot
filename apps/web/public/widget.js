@@ -899,22 +899,25 @@
         messagesDiv.scrollTop = messagesDiv.scrollHeight;
     }
 
+    // Sync state
+    let lastMessageCount = 0;
+
     // Polling logic (Simpler version)
     async function pollMessages() {
         if (!isOpen) return;
         try {
-            const response = await fetch(`http://127.0.0.1:3001/messages?tenant_id=${config.apiKey}&visitor_id=${visitorId}`);
+            const response = await fetch(`${HOST}/messages?tenant_id=${config.apiKey}&visitor_id=${visitorId}`);
             if (response.ok) {
                 const data = await response.json();
                 if (Array.isArray(data.data)) {
-                    // Very simple sync: If count changes, redraw formatted
-                    // Production would use IDs and delta updates
-                    const currentCount = messagesDiv.querySelectorAll('.sb-message-group').length;
-                    if (data.data.length > currentCount) {
+                    // Sync: If count changes from what API knows, redraw
+                    if (data.data.length > lastMessageCount) {
+                        lastMessageCount = data.data.length;
                         messagesDiv.innerHTML = ''; // Clear
                         data.data.forEach(msg => {
                             addMessage(msg.content, msg.role === 'user' ? 'user' : 'bot');
                         });
+                        scrollToBottom();
                     }
                 }
             }
@@ -933,7 +936,7 @@
         showTypingIndicator();
 
         try {
-            const response = await fetch('http://127.0.0.1:3001/messages', {
+            const response = await fetch(`${HOST}/messages`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -952,6 +955,12 @@
             if (data.data && data.data.reply) {
                 addMessage(data.data.reply, 'bot');
             }
+
+            // Force the next poll to do a full refresh to ensure perfect sync
+            // including human agent messages that might have arrived.
+            lastMessageCount = 0;
+            pollMessages();
+
         } catch {
             removeTypingIndicator();
             addMessage("Error: Failed to connect to server.", 'bot');

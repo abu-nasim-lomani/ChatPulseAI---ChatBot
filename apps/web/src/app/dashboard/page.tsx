@@ -1,24 +1,31 @@
 "use client";
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../../context/AuthContext';
 import Link from 'next/link';
-import { MessageSquare, Zap, Book, ArrowUpRight, CheckCircle, ShieldCheck } from 'lucide-react';
+import { MessageSquare, Zap, Book, ArrowUpRight, ShieldCheck, Cpu, Database, Users } from 'lucide-react';
+import axios from 'axios';
 
 export default function DashboardHome() {
     const { user, isLoading } = useAuth();
     const router = useRouter();
+    const [stats, setStats] = useState<any>(null);
 
     useEffect(() => {
         if (!isLoading && !user) {
             router.push('/login');
+        } else if (user?.tenantId) {
+            const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+            axios.get(`${API_URL}/analytics/${user.tenantId}?range=30d`)
+                .then(res => setStats(res.data.overview))
+                .catch(err => console.error("Failed to fetch dashboard stats", err));
         }
     }, [user, isLoading, router]);
 
-    if (isLoading || !user) {
+    if (isLoading || !user || !stats) {
         return (
-            <div className="flex items-center justify-center min-h-[calc(10vh-4rem)]">
+            <div className="flex items-center justify-center min-h-[calc(100vh-4rem)]">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
             </div>
         );
@@ -51,32 +58,28 @@ export default function DashboardHome() {
             {/* Stats Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
                 <StatCard
-                    title="Active Chats"
-                    value="1,248"
-                    change="+12.5%"
-                    trend="up"
+                    title="Total Sessions"
+                    value={stats.totalSessions.toLocaleString()}
+                    change="Last 30 Days"
                     icon={MessageSquare}
                 />
                 <StatCard
                     title="Total Messages"
-                    value="85.2k"
-                    change="+5.2%"
-                    trend="up"
+                    value={stats.totalMessages.toLocaleString()}
+                    change="Last 30 Days"
                     icon={Book}
                 />
                 <StatCard
-                    title="Avg. Response"
-                    value="1.2s"
-                    change="-12ms"
-                    trend="up"
+                    title="AI Handled"
+                    value={stats.aiSessions.toLocaleString()}
+                    change="vs Human Esc."
                     icon={Zap}
                 />
                 <StatCard
-                    title="Resolution Rate"
-                    value="94.2%"
-                    change="+2.1%"
-                    trend="up"
-                    icon={CheckCircle}
+                    title="Lead Conversion Rate"
+                    value={stats.leadConversionRate ? stats.leadConversionRate.toFixed(1) + '%' : '0%'}
+                    change={`${stats.totalLeads} Total Leads`}
+                    icon={Users}
                 />
             </div>
 
@@ -187,6 +190,65 @@ export default function DashboardHome() {
                         </div>
                     </div>
 
+                    {/* Enterprise Usage Metrics */}
+                    <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm relative overflow-hidden group">
+                        {/* Decorative background accent */}
+                        <div className="absolute -right-10 -top-10 w-32 h-32 bg-indigo-50 rounded-full blur-3xl opacity-50 group-hover:bg-indigo-100 transition-colors"></div>
+
+                        <div className="flex items-center justify-between mb-5 relative z-10">
+                            <div>
+                                <h3 className="text-sm font-bold text-gray-900 tracking-tight">Resource Usage</h3>
+                                <p className="text-[10px] text-gray-500 font-medium mt-0.5 uppercase tracking-wider">Enterprise Tier Limits</p>
+                            </div>
+                            <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg">
+                                <Cpu size={16} />
+                            </div>
+                        </div>
+
+                        <div className="space-y-6 relative z-10">
+                            {/* AI Model Tokens */}
+                            <div>
+                                <div className="flex justify-between items-end mb-2">
+                                    <div className="flex items-center gap-1.5">
+                                        <Zap size={12} className="text-gray-400" />
+                                        <span className="text-xs font-semibold text-gray-700">AI Model Tokens</span>
+                                    </div>
+                                    <div className="text-right flex flex-col items-end">
+                                        <div>
+                                            <span className="text-sm font-bold text-gray-900">{stats.totalTokensUsed.toLocaleString()}</span>
+                                            <span className="text-[10px] text-gray-400 ml-1">/ 500k limit</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="w-full bg-gray-50 rounded-full h-2.5 outline outline-1 outline-gray-100 overflow-hidden mb-1.5">
+                                    <div className="bg-gradient-to-r from-indigo-500 to-indigo-600 h-2.5 rounded-full shadow-inner" style={{ width: `${Math.min((stats.totalTokensUsed / 500000) * 100, 100)}%` }}></div>
+                                </div>
+                                <div className="flex justify-between items-center">
+                                    <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2.5 py-0.5 rounded border border-indigo-100 shadow-sm">Est. API Cost: ${stats.estimatedCostUsd !== undefined ? stats.estimatedCostUsd.toFixed(4) : '0.000'}</span>
+                                    <p className="text-[10px] text-gray-400 font-medium">API Usage (GPT-4o)</p>
+                                </div>
+                            </div>
+
+                            {/* Knowledge DB Storage */}
+                            <div>
+                                <div className="flex justify-between items-end mb-2">
+                                    <div className="flex items-center gap-1.5">
+                                        <Database size={12} className="text-gray-400" />
+                                        <span className="text-xs font-semibold text-gray-700">Knowledge DB Storage</span>
+                                    </div>
+                                    <div className="text-right">
+                                        <span className="text-sm font-bold text-gray-900">{(stats.storageBytesUsed / (1024 * 1024)).toFixed(2)} MB</span>
+                                        <span className="text-[10px] text-gray-400 ml-1">/ 50 MB limit</span>
+                                    </div>
+                                </div>
+                                <div className="w-full bg-gray-50 rounded-full h-2.5 outline outline-1 outline-gray-100 overflow-hidden">
+                                    <div className="bg-gradient-to-r from-pink-500 to-pink-600 h-2.5 rounded-full shadow-inner" style={{ width: `${Math.min((stats.storageBytesUsed / (50 * 1024 * 1024)) * 100, 100)}%` }}></div>
+                                </div>
+                                <p className="text-[10px] text-gray-400 mt-1.5 text-right font-medium">Vector Memory Capacity</p>
+                            </div>
+                        </div>
+                    </div>
+
                     {/* System Status Mini */}
                     <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
                         <div className="flex items-center gap-2 mb-3">
@@ -210,19 +272,22 @@ export default function DashboardHome() {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const StatCard = ({ title, value, change, trend, icon: Icon }: { title: string, value: string, change: string, trend: 'up' | 'down', icon: any }) => (
-    <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm hover:shadow-md transition-all duration-200 group">
-        <div className="flex justify-between items-start mb-2">
+const StatCard = ({ title, value, change, icon: Icon }: { title: string, value: string, change: string, icon: any }) => (
+    <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm hover:shadow-md transition-all duration-200 group relative overflow-hidden">
+        <div className="absolute -right-4 -top-4 opacity-[0.03] group-hover:opacity-[0.08] transition-opacity duration-500 transform group-hover:scale-110">
+            <Icon size={120} />
+        </div>
+        <div className="flex justify-between items-start mb-2 relative z-10">
             <h3 className="text-gray-500 text-[10px] font-bold uppercase tracking-wider">{title}</h3>
-            <Icon className="w-4 h-4 text-gray-400 group-hover:text-indigo-500 transition-colors" />
+            <div className="p-1.5 bg-gray-50 rounded-lg group-hover:bg-indigo-50 transition-colors">
+                <Icon className="w-4 h-4 text-gray-400 group-hover:text-indigo-600 transition-colors" />
+            </div>
         </div>
-        <div className="flex items-baseline gap-2 mb-1">
-            <span className="text-xl font-bold text-gray-900 tracking-tight">{value}</span>
+        <div className="flex items-baseline gap-2 mb-1 relative z-10">
+            <span className="text-2xl font-bold text-gray-900 tracking-tight">{value}</span>
         </div>
-        <div className={`flex items-center text-[10px] font-medium ${trend === 'up' ? 'text-green-600' : 'text-red-600'}`}>
-            {trend === 'up' ? <ArrowUpRight size={10} className="mr-1" /> : <ArrowUpRight size={10} className="mr-1 rotate-90" />}
-            {change}
-            <span className="text-gray-400 ml-1 font-normal">vs last month</span>
+        <div className="flex items-center text-[10px] font-medium text-gray-500 relative z-10">
+            <span className="text-gray-400 font-medium">{change}</span>
         </div>
     </div>
 );

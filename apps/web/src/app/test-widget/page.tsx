@@ -1,122 +1,117 @@
 "use client";
 
 import { useSearchParams } from 'next/navigation';
-import { useEffect, useState, Suspense } from 'react';
+import { Suspense, useEffect } from 'react';
+
+// Extend the global Window interface to include ChatbotConfig
+declare global {
+    interface Window {
+        ChatbotConfig?: {
+            apiKey: string;
+        };
+    }
+}
 
 function TestWidgetContent() {
     const searchParams = useSearchParams();
-    const tenantId = searchParams.get('tenantId');
-    // Initialize status based on tenantId presence to avoid sync effect
-    const [status, setStatus] = useState<'loading' | 'ready' | 'missing'>(tenantId ? 'loading' : 'missing');
+    const tenantId = searchParams?.get('tenantId');
 
     useEffect(() => {
         if (!tenantId) return;
 
-        // Set Config
-        // @ts-expect-error - ChatbotConfig is defined on window in widget.js
-        window.ChatbotConfig = { apiKey: tenantId };
+        // Configuration object expected by the widget
+        window.ChatbotConfig = {
+            apiKey: tenantId
+        };
 
-        // Load Script
+        // Load the widget script
         const script = document.createElement('script');
-        script.src = "/widget.js"; // Loads from public/widget.js
+        script.src = '/widget.js'; // The script in public folder
         script.defer = true;
-        script.onload = () => setStatus('ready');
         document.body.appendChild(script);
 
         return () => {
+            // Clean up when unmounting (optional but good practice)
             if (document.body.contains(script)) {
                 document.body.removeChild(script);
             }
-            // Cleanup widget UI if possible (widget.js doesn't export a destroy method yet, so we just remove the button)
-            const btn = document.querySelector('.sb-widget-button');
-            const win = document.querySelector('.sb-chat-window');
-            if (btn) btn.remove();
-            if (win) win.remove();
-        }
+        };
     }, [tenantId]);
 
-    if (status === 'missing') {
+    if (!tenantId) {
         return (
-            <div className="min-h-screen flex items-center justify-center p-4 bg-gray-50">
-                <div className="bg-white p-8 rounded-xl shadow-lg max-w-md text-center">
-                    <div className="text-4xl mb-4">⚠️</div>
-                    <h1 className="text-xl font-bold text-gray-800 mb-2">Missing Tenant ID</h1>
-                    <p className="text-gray-600 mb-6">
-                        Please provides a <code>tenantId</code> parameter in the URL.
-                    </p>
-                    <a href="/dashboard/integration" className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition">
-                        Go to Dashboard
-                    </a>
-                </div>
+            <div className="flex items-center justify-center min-h-screen bg-slate-50 text-slate-500">
+                <p>Missing tenantId parameter in URL.</p>
             </div>
         );
     }
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50 flex items-center justify-center p-4">
-            <div className="max-w-2xl w-full">
-                <div className="text-center mb-12">
-                    <h1 className="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-purple-600 mb-4">
-                        Chatbot Playground 🧪
-                    </h1>
-                    <p className="text-lg text-gray-600">
-                        Test your AI assistant in a safe environment.
-                    </p>
-                </div>
-
-                <div className="bg-white/80 backdrop-blur-sm p-8 rounded-2xl shadow-xl border border-white/20">
-                    <h2 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
-                        <span className="bg-green-100 text-green-600 p-1.5 rounded-lg text-sm">✅</span>
-                        Testing Checklist
-                    </h2>
-
-                    <ul className="space-y-4 text-gray-700">
-                        <li className="flex items-start gap-3">
-                            <div className="mt-1 w-5 h-5 rounded-full border-2 border-indigo-200 flex items-center justify-center text-indigo-600 text-xs font-bold">1</div>
-                            <div>
-                                <strong className="block text-gray-900">Locate the Widget</strong>
-                                <span className="text-sm text-gray-500">Look for the floating button in the bottom-right corner.</span>
-                            </div>
-                        </li>
-                        <li className="flex items-start gap-3">
-                            <div className="mt-1 w-5 h-5 rounded-full border-2 border-indigo-200 flex items-center justify-center text-indigo-600 text-xs font-bold">2</div>
-                            <div>
-                                <strong className="block text-gray-900">Start a Conversation</strong>
-                                <span className="text-sm text-gray-500">Click to open and verify the welcome message loads.</span>
-                            </div>
-                        </li>
-                        <li className="flex items-start gap-3">
-                            <div className="mt-1 w-5 h-5 rounded-full border-2 border-indigo-200 flex items-center justify-center text-indigo-600 text-xs font-bold">3</div>
-                            <div>
-                                <strong className="block text-gray-900">Ask a Question</strong>
-                                <span className="text-sm text-gray-500">Try saying &quot;Hello&quot; or ask about your business.</span>
-                            </div>
-                        </li>
-                    </ul>
-
-                    <div className="mt-8 pt-6 border-t border-gray-100 flex justify-between items-center text-sm">
-                        <div className="text-gray-500">
-                            Status: <span className="font-medium text-green-600">Widget Active</span>
+        <div className="min-h-screen bg-slate-50 font-sans">
+            {/* Mock Website Header */}
+            <header className="bg-white border-b border-slate-200">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5 flex justify-between items-center">
+                    <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold text-xl">
+                            D
                         </div>
-                        <div className="font-mono text-xs bg-gray-100 px-2 py-1 rounded text-gray-600">
-                            Tenant: {tenantId?.slice(0, 8)}...
+                        <span className="text-xl font-bold text-slate-900 tracking-tight">Demo Corp</span>
+                    </div>
+                    <nav className="hidden md:flex gap-8 text-sm font-medium text-slate-600">
+                        <a href="#" className="hover:text-indigo-600 transition-colors">Products</a>
+                        <a href="#" className="hover:text-indigo-600 transition-colors">Services</a>
+                        <a href="#" className="hover:text-indigo-600 transition-colors">About Us</a>
+                        <a href="#" className="text-indigo-600 font-bold">Contact Support</a>
+                    </nav>
+                </div>
+            </header>
+
+            {/* Mock Website Content */}
+            <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+                <div className="max-w-3xl space-y-8">
+                    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 text-sm font-semibold tracking-wide border border-indigo-100">
+                        <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
+                        Live Widget Testing Sandbox
+                    </div>
+                    <h1 className="text-5xl font-extrabold text-slate-900 tracking-tight leading-tight">
+                        See your Chatbot in action on a real website.
+                    </h1>
+                    <p className="text-lg text-slate-600 leading-relaxed max-w-2xl">
+                        This is a simulated webpage. The chat widget is loaded at the bottom right corner using your unique tenant ID: <code className="bg-slate-200 px-2 py-0.5 rounded text-sm font-mono text-slate-800">{tenantId}</code>
+                    </p>
+
+                    <div className="flex gap-4 pt-4">
+                        <button className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-lg font-bold shadow-sm transition-all focus:ring-4 focus:ring-indigo-100">
+                            Explore Features
+                        </button>
+                        <button className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-6 py-3 rounded-lg font-bold shadow-sm transition-all">
+                            Read Documentation
+                        </button>
+                    </div>
+
+                    <div className="pt-16 grid grid-cols-1 md:grid-cols-2 gap-8">
+                        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                            <h3 className="font-bold text-slate-900 mb-2">Test AI Replies</h3>
+                            <p className="text-sm text-slate-600">Ask the bot a question related to your uploaded knowledge base documents to see how it automatically answers.</p>
+                        </div>
+                        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                            <h3 className="font-bold text-slate-900 mb-2">Test Human Handoff</h3>
+                            <p className="text-sm text-slate-600">Click the &quot;Speak to Human Agent&quot; button, then go to your dashboard live chat to respond back directly here.</p>
                         </div>
                     </div>
                 </div>
-
-                <div className="mt-8 text-center">
-                    <a href="/dashboard/integration" className="text-indigo-600 hover:text-indigo-800 text-sm font-medium">
-                        &larr; Back to Dashboard
-                    </a>
-                </div>
-            </div>
+            </main>
         </div>
     );
 }
 
 export default function TestWidgetPage() {
     return (
-        <Suspense fallback={<div className="p-10 text-center">Loading test environment...</div>}>
+        <Suspense fallback={
+            <div className="flex items-center justify-center min-h-screen">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+            </div>
+        }>
             <TestWidgetContent />
         </Suspense>
     );

@@ -428,6 +428,9 @@
         messagesDiv.scrollTop = messagesDiv.scrollHeight;
     }
 
+    // Track the number of messages received from API
+    let lastMessageCount = 0;
+
     // Polling for new messages
     async function pollMessages() {
         try {
@@ -437,16 +440,15 @@
                 if (data.status === 'success' && Array.isArray(data.data)) {
 
                     const newMessages = data.data;
-                    const currentMessages = messagesDiv.querySelectorAll('.sb-message');
-                    // Simple check: if count differs, re-render. 
-                    // Note: This is a hacky way to sync. Ideal is by ID.
 
-                    if (newMessages.length > currentMessages.length) {
-                        // Clear messages but KEEP typing indicator
+                    if (newMessages.length > lastMessageCount) {
+                        lastMessageCount = newMessages.length;
+
+                        const currentMessages = messagesDiv.querySelectorAll('.sb-message');
                         // Store current typing state
                         const isTyping = typingIndicator.style.display === 'flex';
 
-                        // Remove all .sb-message elements
+                        // Remove all existing messages to rebuild from definitive state
                         currentMessages.forEach(el => el.remove());
 
                         // Re-add all messages in order
@@ -515,8 +517,15 @@
 
             // Handle reply - don't show error if in agent mode (agent will reply manually)
             if (data && data.data && data.data.reply) {
-                setTimeout(() => addMessage(data.data.reply, 'bot'), 300);
+                // If there is an immediate AI reply, let the next poll fetch it cleanly
+                // or we could append it, but resetting lastMessageCount ensures 100% sync
             }
+
+            // Force the next poll to do a full refresh to ensure perfect sync
+            // including human agent messages that might have arrived at the exact same time
+            lastMessageCount = 0;
+            pollMessages();
+
             // Note: No error message if no reply - agent might be typing in live mode
 
         } catch (error) {
